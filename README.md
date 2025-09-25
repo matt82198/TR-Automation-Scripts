@@ -32,9 +32,9 @@ export PAYPAL_CLIENT_ID=your_paypal_client_id
 export PAYPAL_CLIENT_SECRET=your_paypal_client_secret
 ```
 
-## Panel Count Script
+## Pending Order Count Script
 
-**File:** `panel_count.py`
+**File:** `pending_order_count.py`
 
 This script connects to the Squarespace API to count panel and swatch book products from pending orders. It provides detailed breakdowns by product type, variant specifications, and SKUs.
 
@@ -47,7 +47,7 @@ This script connects to the Squarespace API to count panel and swatch book produ
 ### Usage
 
 ```bash
-python panel_count.py
+python pending_order_count.py
 ```
 
 ### Example Output
