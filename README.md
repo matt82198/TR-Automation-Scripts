@@ -2,6 +2,65 @@
 
 A collection of scripts used to automate processes at The Tannery Row LLC
 
+## Setup
+
+### Prerequisites
+- Python 3.7 or higher
+- Required Python packages: `requests`
+
+### Installation
+```bash
+pip install requests
+```
+
+### API Keys
+Set your API keys as environment variables:
+
+**Windows:**
+```cmd
+set SQUARESPACE_API_KEY=your-squarespace-api-key-here
+```
+
+**Mac/Linux:**
+```bash
+export SQUARESPACE_API_KEY=your-squarespace-api-key-here
+```
+
+## Panel Count Script
+
+**File:** `panel_count.py`
+
+This script connects to the Squarespace API to count panel and swatch book products from pending orders. It provides detailed breakdowns by product type, variant specifications, and SKUs.
+
+### Features
+- **SKU-based counting** for precise product identification
+- **Variant details** including sizes, weights, leather types (Dublin, Glove, etc.)
+- **Separate tracking** of panels and swatch books
+- **Detailed output** with product names, variant descriptions, and SKU references
+
+### Usage
+
+```bash
+python panel_count.py
+```
+
+### Example Output
+
+```
+Panel counts:
+  Horween Dublin Leather Panels (Size: 2′ Panel - Weight: 3-4 oz) [SKU: SQ5172253]: 1
+Total panels: 1
+
+Swatch book counts:
+  Horween Swatch Books (Swatch Book: Dublin) [SKU: SQ6839957]: 1
+  Horween Swatch Books (Swatch Book: Glove) [SKU: SQ0776396]: 1
+Total swatch books: 2
+```
+
+### Configuration
+- By default, fetches orders with "PENDING" fulfillment status
+- Modify the script to change fulfillment status or add date filters if needed
+
 ## Migrate Sortly Inventory
 
 This script is a POC of how we can use LLM intelligence in order to differentiate between multi-worded colors and materials. Purposed to migrate the current sortly inventory to any other chosen platform once Shopify is migrated to.
