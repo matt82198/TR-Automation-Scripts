@@ -6,11 +6,11 @@ A collection of scripts used to automate processes at The Tannery Row LLC
 
 ### Prerequisites
 - Python 3.7 or higher
-- Required Python packages: `requests`
+- Required Python packages: `requests`, `stripe`
 
 ### Installation
 ```bash
-pip install requests
+pip install requests stripe
 ```
 
 ### API Keys
@@ -19,11 +19,17 @@ Set your API keys as environment variables:
 **Windows:**
 ```cmd
 set SQUARESPACE_API_KEY=your-squarespace-api-key-here
+set STRIPE_API_KEY=sk_live_your_stripe_key_here
+set PAYPAL_CLIENT_ID=your_paypal_client_id
+set PAYPAL_CLIENT_SECRET=your_paypal_client_secret
 ```
 
 **Mac/Linux:**
 ```bash
 export SQUARESPACE_API_KEY=your-squarespace-api-key-here
+export STRIPE_API_KEY=sk_live_your_stripe_key_here
+export PAYPAL_CLIENT_ID=your_paypal_client_id
+export PAYPAL_CLIENT_SECRET=your_paypal_client_secret
 ```
 
 ## Panel Count Script
@@ -65,38 +71,93 @@ Total swatch books: 2
 
 This script is a POC of how we can use LLM intelligence in order to differentiate between multi-worded colors and materials. Purposed to migrate the current sortly inventory to any other chosen platform once Shopify is migrated to.
 
-## Pull Squarespace Invoice Date Range Info + Summary
+## Payment Fetch Script (EOM Billing Report)
 
-This script will pull down a list of payments given any date range passed in as a parameter. This will also return the following details in summary of the date range:
+**File:** `payment_fetch.py`
 
-### Summary
-- Total Gross Revenue
-- Total Processing Fees  
-- Total Net Revenue
-- Average Fee Rate
-- Number of Transactions
-- Average Transaction
+This script pulls transaction data from both Stripe and PayPal for end-of-month (EOM) billing reports. It provides comprehensive summaries with breakdowns by payment source and supports CSV export.
+
+### Features
+- **Multi-source support** - Fetches from Stripe and PayPal simultaneously
+- **Read-only operations** - Cannot create, modify, or delete transactions
+- **Detailed summaries** - Shows gross revenue, fees, net revenue, and fee rates
+- **CSV export** - Save data for further analysis
+- **Date range filtering** - Specify custom date ranges or use defaults
+
+### Prerequisites
+Set up your API keys as environment variables:
+
+```bash
+# Required for Stripe
+export STRIPE_API_KEY=sk_live_your_stripe_key_here
+
+# Required for PayPal
+export PAYPAL_CLIENT_ID=your_paypal_client_id
+export PAYPAL_CLIENT_SECRET=your_paypal_client_secret
+
+# Optional: Set to 'sandbox' for PayPal testing (defaults to 'live')
+export PAYPAL_MODE=live
+```
 
 ### Usage
 
 ```bash
-stripe_invoices.py [-h] [--start-date START_DATE] [--end-date END_DATE] [--csv]
+python payment_fetch.py [options]
 ```
 
 ### Options
 
 ```
--h, --help            show this help message and exit
---start-date START_DATE
-                      Start date (YYYY-MM-DD). Default: 30 days ago
---end-date END_DATE   End date (YYYY-MM-DD). Default: today
---csv                 Export results to CSV file
+--start-date START_DATE    Start date (YYYY-MM-DD). Default: 30 days ago
+--end-date END_DATE        End date (YYYY-MM-DD). Default: today
+--source {stripe,paypal,both}  Payment source to fetch. Default: both
+--csv                      Export results to CSV file
 ```
 
 ### Example Usage
 
 ```bash
-python stripe_invoices.py --csv
+# Get last 30 days from both sources with CSV export
+python payment_fetch.py --csv
+
+# Get specific date range from Stripe only
+python payment_fetch.py --start-date 2024-01-01 --end-date 2024-01-31 --source stripe
+
+# Get PayPal transactions for last week
+python payment_fetch.py --start-date 2024-01-15 --source paypal
 ```
 
-When executed, this will return all data for the last 30 days by default and export to CSV.
+### Example Output
+
+```
+============================================================
+EOM BILLING SUMMARY
+============================================================
+
+Stripe:
+  Transactions: XX
+  Gross Revenue: $XXX.XX
+  Processing Fees: $XX.XX
+  Net Revenue: $XXX.XX
+  Fee Rate: X.XX%
+
+PayPal:
+  Transactions: XX
+  Gross Revenue: $XXX.XX
+  Processing Fees: $XX.XX
+  Net Revenue: $XXX.XX
+  Fee Rate: X.XX%
+
+==============================
+COMBINED TOTAL:
+  All Transactions: XX
+  Total Gross: $XXX.XX
+  Total Fees: $XX.XX
+  Total Net: $XXX.XX
+  Overall Fee Rate: X.XX%
+```
+
+### Troubleshooting
+- **PayPal 403 Error**: Transaction Search API may be disabled. Call PayPal support at 1-888-221-1161 to enable
+- **Missing transactions**: Verify API keys are set correctly
+- **Date format**: Use YYYY-MM-DD format for dates
