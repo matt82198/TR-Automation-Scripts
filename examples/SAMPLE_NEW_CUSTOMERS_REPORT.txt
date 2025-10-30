@@ -1,0 +1,54 @@
+======================================================================
+NEW CUSTOMERS CREATED FROM SQUARESPACE IMPORT
+======================================================================
+
+Total Invoices: 150
+Existing Customers (matched): 103
+NEW CUSTOMERS (flagged): 47
+
+----------------------------------------------------------------------
+
+FLAGGED NEW CUSTOMERS:
+(These customer records are in the IIF file)
+
+1. Alice Johnson
+   Email: alice.j@email.com
+   Phone: (555) 123-4567
+   Address: 123 Main Street
+            Springfield IL 62701
+
+2. Bob Martinez
+   Email: bob.martinez@email.com
+   Phone: (555) 234-5678
+   Address: 456 Oak Avenue
+            Austin TX 78701
+
+3. Carol Williams
+   Email: carol.w@email.com
+   Phone: (555) 345-6789
+   Address: 789 Pine Road
+            Seattle WA 98101
+
+4. David Chen
+   Email: dchen@email.com
+   Phone: (555) 456-7890
+   Address: 321 Elm Street
+            Portland OR 97201
+
+... and 43 more customers
+
+======================================================================
+
+HOW THIS WORKS:
+- These customers will be CREATED when you import the IIF file
+- QuickBooks will add them with full contact information
+- Their invoices will be created immediately after
+- If a customer name already exists in QB, it will be skipped
+
+WHAT TO DO:
+1. Review this list to ensure names/emails are correct
+2. Check for any potential duplicates (similar names)
+3. Import the IIF file into QuickBooks
+4. Verify new customers were created properly in QB
+
+======================================================================
