@@ -22,7 +22,7 @@ def parse_arguments():
     parser.add_argument('--end-date', type=str,
                         default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--source', choices=['stripe', 'paypal', 'both'], default='both')
-    parser.add_argument('--csv', action='store_true', help='Export to CSV')
+    parser.add_argument('--csv', action='store_true', default=True, help='Export to CSV (enabled by default)')
     return parser.parse_args()
 
 
@@ -63,7 +63,7 @@ def fetch_stripe_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
     CANNOT create, modify, or delete anything
     """
     if not stripe.api_key:
-        print("⚠️  Stripe API key not set")
+        print("WARNING: Stripe API key not set")
         return []
 
     print(f"READ-ONLY: Fetching Stripe transactions from {start_date} to {end_date}...")
@@ -140,7 +140,7 @@ def fetch_paypal_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
     """
     token = get_paypal_readonly_token()
     if not token:
-        print("⚠️  PayPal credentials not set")
+        print("WARNING: PayPal credentials not set")
         return []
 
     print(f"READ-ONLY: Fetching PayPal transactions from {start_date} to {end_date}...")
@@ -172,11 +172,11 @@ def fetch_paypal_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
         )
 
         if response.status_code == 403:
-            print("\n⚠️  PayPal Transaction Search is disabled.")
+            print("\nWARNING: PayPal Transaction Search is disabled.")
             print("   To enable: Call PayPal Support at 1-888-221-1161")
             print("   Ask them to enable 'Transaction Search API'")
             print("\n   Alternative: Download CSV from PayPal Dashboard:")
-            print("   Activity → Statements → Activity download")
+            print("   Activity -> Statements -> Activity download")
             return []
 
         response.raise_for_status()
@@ -283,7 +283,7 @@ def export_csv(transactions: List[Dict[str, Any]], start_date: str, end_date: st
         for txn in sorted(transactions, key=lambda x: x['date']):
             writer.writerow(txn)
 
-    print(f"\n✅ Exported to {filename}")
+    print(f"\nSUCCESS: Exported to {filename}")
 
 
 def main():
@@ -315,7 +315,7 @@ def main():
 
     # Show setup help if needed
     if not all_transactions:
-        print("\n📝 Setup Instructions:")
+        print("\nSetup Instructions:")
         if not stripe.api_key:
             print("  Stripe: export STRIPE_API_KEY='sk_live_...'")
         if not PAYPAL_CLIENT_ID:

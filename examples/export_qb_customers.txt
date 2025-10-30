@@ -1,0 +1,48 @@
+# HOW TO EXPORT CUSTOMERS FROM QUICKBOOKS
+
+This file explains how to export your customer list from QuickBooks Desktop
+so the script can match existing customers and avoid duplicates.
+
+## Steps to Export Customers:
+
+1. Open QuickBooks Desktop
+
+2. Go to: Reports > List > Customer Contact List
+
+3. Click "Excel" button (or "Export")
+
+4. Choose "Create New Worksheet"
+
+5. Save as CSV file (e.g., "qb_customers.csv")
+
+6. Make sure the export includes these columns:
+   - Name (customer name in QB)
+   - Email
+   - Phone or Phone Number
+   - Contact or Full Name (optional)
+
+## Using the Customer File:
+
+Run the script with the --customers flag:
+
+    python squarespace_to_quickbooks.py --customers qb_customers.csv
+
+## What the Matching Does:
+
+The script will try to match Squarespace orders to existing QB customers by:
+
+1. Email (most reliable) - exact match
+2. Phone number - normalized (removes spaces, dashes, etc.)
+3. Last name - if only one customer with that last name
+4. Last name + First name - if multiple matches, checks first name too
+
+If a match is found, it uses the existing customer name from QuickBooks.
+If no match, it creates a new customer.
+
+## Alternative: Manual Export
+
+If the Customer Contact List report doesn't work, you can also:
+
+1. Go to: Lists > Customers
+2. Export the customer list
+3. Make sure it's saved as CSV with at least: Name, Email, Phone columns

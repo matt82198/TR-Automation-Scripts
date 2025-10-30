@@ -1,0 +1,3 @@
+@echo off
+set PAYPAL_CLIENT_SECRET=EB3TC1QOko_HZwCtb1iMm2Ji6w7Vicmiv5S5udlhgBD7wpqYVKmHRzwjVobWppFBkWYOjhpo3d8EhKDz
+py payment_fetch.py --source paypal
