@@ -1,5 +1,5 @@
-# CSV files
-*.csv
+# CSV files (but allow sku_mapping.csv)
+examples/**/*.csv
 
 # IDE files
 .idea/
@@ -22,3 +22,12 @@ Thumbs.db
 
 # Claude Code settings
 .claude/
+
+# Customer data and import tracking (local only, not committed)
+customers.csv
+import_log.csv
+
+# Generated IIF files
+*.iif
+*_NEW_CUSTOMERS.txt
+*_UNMAPPED_PRODUCTS.txt

@@ -10,8 +10,8 @@ set EMAIL_USER=your_email@gmail.com
 set EMAIL_PASSWORD=your_app_password_here
 set EMAIL_RECIPIENT=matt@thetanneryrow.com
 
-REM Fetch orders fulfilled today and email the IIF file
-python scripts\squarespace_to_quickbooks.py --fulfilled-today
+REM Fetch orders fulfilled today and email the IIF file (with customer matching)
+python scripts\squarespace_to_quickbooks.py --fulfilled-today --customers customers.csv
 
 REM The script will:
 REM 1. Fetch all orders fulfilled TODAY
