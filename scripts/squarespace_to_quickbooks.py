@@ -487,7 +487,7 @@ class CustomerMatcher:
     def load_existing_customers(self, csv_file: str) -> None:
         """
         Load existing customers from QuickBooks export
-        Expected columns: Name, Email, Phone, Contact, etc.
+        Expected columns: Customer, Main Email, Main Phone, First Name, Last Name, etc.
         """
         if not os.path.exists(csv_file):
             print(f"Warning: Customer file not found: {csv_file}")
@@ -500,32 +500,39 @@ class CustomerMatcher:
                 reader = csv.DictReader(f)
 
                 for row in reader:
-                    name = row.get('Name', '').strip()
+                    # QB exports use "Customer" column
+                    name = row.get('Customer', '').strip() or row.get('Name', '').strip()
                     if not name:
                         continue
 
                     customer_record = {'name': name}
 
-                    # Email mapping
-                    email = row.get('Email', '').strip().lower()
+                    # Email mapping - QB exports use "Main Email"
+                    email = row.get('Main Email', '').strip().lower() or row.get('Email', '').strip().lower()
                     if email:
                         self.email_map[email] = name
                         customer_record['email'] = email
 
-                    # Phone mapping (normalize)
-                    phone = row.get('Phone', '') or row.get('Phone Number', '')
+                    # Phone mapping - QB exports use "Main Phone"
+                    phone = row.get('Main Phone', '') or row.get('Phone', '') or row.get('Phone Number', '')
                     phone_normalized = normalize_for_matching(phone)
                     if phone_normalized:
                         self.phone_map[phone_normalized] = name
                         customer_record['phone'] = phone_normalized
 
                     # Last name mapping
-                    contact = row.get('Contact', '') or row.get('Full Name', '') or name
-                    if ' ' in contact:
-                        last_name = contact.split()[-1].lower()
-                        if last_name not in self.lastname_map:
-                            self.lastname_map[last_name] = []
-                        self.lastname_map[last_name].append(name)
+                    last_name = row.get('Last Name', '').strip()
+                    if not last_name:
+                        # Try to extract from customer name
+                        contact = row.get('Contact', '') or row.get('Full Name', '') or name
+                        if ' ' in contact:
+                            last_name = contact.split()[-1]
+
+                    if last_name:
+                        last_name_lower = last_name.lower()
+                        if last_name_lower not in self.lastname_map:
+                            self.lastname_map[last_name_lower] = []
+                        self.lastname_map[last_name_lower].append(name)
 
                     self.customers.append(customer_record)
 

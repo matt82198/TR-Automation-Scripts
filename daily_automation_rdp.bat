@@ -24,8 +24,8 @@ REM Generate today's filename
 set TODAY=%date:~-4,4%-%date:~-10,2%-%date:~-7,2%
 set OUTPUT_FILE=%QB_IMPORT_PATH%\squarespace_fulfilled_%TODAY%.iif
 
-REM Fetch orders fulfilled today and save to RDP (with product mapping)
-python scripts\squarespace_to_quickbooks.py --fulfilled-today --output "%OUTPUT_FILE%" --product-mapping sku_mapping.csv
+REM Fetch orders fulfilled today and save to RDP (with customer matching and product mapping)
+python scripts\squarespace_to_quickbooks.py --fulfilled-today --output "%OUTPUT_FILE%" --customers customers.csv --product-mapping sku_mapping.csv
 
 REM Copy the new customers report too
 copy "squarespace_fulfilled_%TODAY%_NEW_CUSTOMERS.txt" "%QB_IMPORT_PATH%\" >nul 2>&1
