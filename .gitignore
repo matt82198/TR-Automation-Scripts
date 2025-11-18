@@ -31,3 +31,8 @@ import_log.csv
 *.iif
 *_NEW_CUSTOMERS.txt
 *_UNMAPPED_PRODUCTS.txt
+*_ENCRYPTED.zip
+
+# Gmail OAuth credentials (NEVER commit these!)
+gmail_credentials.json
+gmail_token.json
