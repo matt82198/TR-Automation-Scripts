@@ -180,7 +180,7 @@ Automatically import Squarespace orders as QuickBooks Desktop invoices with prod
 ✅ Auto-creates new customers with full contact info
 ✅ Flags new customers in separate report
 ✅ **REP = "SHOP"** and **SHIP VIA = "UPS"** (hardcoded)
-✅ QuickBooks auto-generates invoice numbers
+✅ **Flexible invoice numbering** - blank (default) or use Squarespace order numbers
 ✅ **Daily automation** - saves to RDP or emails files
 
 ### Quick Start
@@ -212,12 +212,20 @@ python scripts\squarespace_to_quickbooks.py --order-numbers 1001,1002,1003
 
 # Date range
 python scripts\squarespace_to_quickbooks.py --start-date 2025-01-01 --end-date 2025-01-31
+
+# OPTIONAL: Use Squarespace order numbers as QB invoice numbers with "SS-" prefix (instead of blank)
+python scripts\squarespace_to_quickbooks.py --fulfilled-today --use-ss-invoice-numbers
 ```
 
 **4. Import to QuickBooks:**
 - File > Utilities > Import > IIF Files
-- Select the generated `.iif` file
-- QuickBooks will auto-assign invoice numbers
+- Select the generated `.iif` file (customers first, then invoices)
+- Invoices will import with BLANK invoice numbers (unless you used `--use-ss-invoice-numbers`)
+
+**5. Assign Invoice Numbers:**
+- **Default (blank):** In QuickBooks, find invoices with blank numbers and manually assign sequential invoice numbers
+- **Optional:** Use `--use-ss-invoice-numbers` flag to automatically use Squarespace order numbers
+- **Why blank is default?** Prevents conflicts in multi-user RDP environments where concurrent imports could override invoice numbers
 
 ### Key Features
 
@@ -227,6 +235,7 @@ python scripts\squarespace_to_quickbooks.py --start-date 2025-01-01 --end-date 2
 - **Pieces Extraction**: From customizations/variants in Squarespace API
 - **Location-Based Tax**: Compare ship-to vs ship-from state
 - **Customer Matching**: Smart duplicate detection by email/phone/name
+- **Flexible Invoice Numbering**: Blank by default (manual), or use Squarespace order numbers with `--use-ss-invoice-numbers`
 - **Daily Automation**: Auto-generate IIF files for fulfilled orders
 - **Flexible Import**: Single, multiple, or batch by date range
 - **REP & SHIP VIA**: Automatically set to "SHOP" and "UPS"
@@ -236,7 +245,7 @@ python scripts\squarespace_to_quickbooks.py --start-date 2025-01-01 --end-date 2
 | QuickBooks | Squarespace | Notes |
 |------------|-------------|-------|
 | Date | `createdOn` | Invoice date |
-| Invoice # | *(auto)* | QB generates sequential numbers |
+| Invoice # | *(blank or SS-####)* | Blank by default, or "SS-1001" format with `--use-ss-invoice-numbers` |
 | Customer | `billingAddress` | Smart duplicate detection |
 | Ship To | `shippingAddress` | Full address |
 | Ship Date | `fulfilledOn` | Fulfillment date |
@@ -263,6 +272,49 @@ After each import, the script generates helpful reports:
 - Provides suggested mapping entries to add
 - **⚠️ Review this before importing to avoid unwanted QB items!**
 
+### Invoice Numbering Workflow
+
+**Invoice Numbering Options:**
+
+**Option 1: Blank Invoice Numbers (Default - Recommended)**
+- Invoices import with blank invoice numbers
+- You manually assign sequential numbers after import
+- **Benefits:**
+  - Prevents conflicts in multi-user RDP environments
+  - Gives you full control over sequential numbering
+  - No risk of overriding existing QB invoice numbers
+
+**Option 2: Use Squarespace Order Numbers (Optional)**
+- Add `--use-ss-invoice-numbers` flag when running the script
+- Uses Squarespace order numbers with "SS-" prefix (e.g., "SS-1001", "SS-1002") as QB invoice numbers
+- **Benefits:**
+  - Automatic - no manual numbering needed
+  - Perfect traceability between Squarespace and QuickBooks
+  - Prefix prevents conflicts with existing QB invoice numbers
+- **Trade-offs:**
+  - Non-sequential in QuickBooks (gaps based on which orders you import)
+  - Different numbering format than your regular QB invoices
+
+**How to batch-number invoices after import:**
+
+1. **Find blank invoices:**
+   - In QuickBooks Desktop, go to: Reports > Banking > Missing Checks
+   - Change account to: Accounts Receivable
+   - This shows all invoice numbers (or blanks) in your A/R account
+
+2. **Assign numbers:**
+   - Open each invoice with a blank number
+   - Type your desired invoice number (e.g., next sequential number)
+   - Click Save & Close
+   - QuickBooks will continue the sequence for future invoices
+
+3. **Alternative - Batch edit:**
+   - Sort invoices by date or customer
+   - Number them sequentially in one session
+   - Maintains proper audit trail
+
+**💡 Tip:** Import all Squarespace invoices in one batch, then number them all at once for efficiency.
+
 ### Action Items
 
 **Required:**
@@ -271,7 +323,8 @@ After each import, the script generates helpful reports:
 - [ ] Create `sku_mapping.csv` with your product mappings
 - [ ] Test with one order: `python squarespace_to_quickbooks.py --order-numbers 1001`
 - [ ] **Review `_UNMAPPED_PRODUCTS.txt` report (if generated)**
-- [ ] Import to QuickBooks and verify
+- [ ] Import to QuickBooks (customers first, then invoices)
+- [ ] **Manually assign invoice numbers** (see Invoice Numbering Workflow above)
 
 **Optional:**
 - [ ] Export QB customer list for smart duplicate detection

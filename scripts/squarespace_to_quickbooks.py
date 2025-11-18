@@ -31,8 +31,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description='Import Squarespace invoices to QuickBooks Desktop - Single, multiple, or batch'
     )
-    parser.add_argument('--order-numbers', type=str,
-                        default=None,
+    parser.add_argument('--order-numbers', '--order-number', type=str,
+                        default=None, dest='order_numbers',
                         help='Specific order number(s) to import. Comma-separated for multiple: 1001,1002,1003')
     parser.add_argument('--fulfilled-today', action='store_true',
                         help='Fetch orders fulfilled today (for daily automation)')
@@ -60,6 +60,8 @@ def parse_arguments():
     parser.add_argument('--email', type=str,
                         default=None,
                         help='Email address to send IIF file to (requires EMAIL_USER and EMAIL_PASSWORD env vars)')
+    parser.add_argument('--use-ss-invoice-numbers', action='store_true',
+                        help='Use Squarespace order numbers as QB invoice numbers (default: blank)')
     return parser.parse_args()
 
 
@@ -83,29 +85,47 @@ def fetch_specific_order(order_number: str) -> Optional[Dict[str, Any]]:
     }
 
     try:
-        # Search for order by order number
-        params = {'orderNumber': order_number}
+        # NOTE: Squarespace API doesn't support filtering by orderNumber parameter
+        # We must fetch orders and search for matching orderNumber
+        # Start with recent orders to minimize API calls
 
-        response = requests.get(
-            f'{SQUARESPACE_BASE_URL}/commerce/orders',
-            headers=headers,
-            params=params,
-            timeout=30
-        )
+        cursor = None
+        max_pages = 10  # Limit to prevent infinite loops
 
-        if response.status_code == 401:
-            print("ERROR: Authentication failed. Check your SQUARESPACE_API_KEY")
-            return None
-        elif response.status_code == 403:
-            print("ERROR: Access denied. Ensure you have Commerce Advanced plan")
-            return None
+        for page in range(max_pages):
+            params = {}  # Fetch all orders (API returns most recent first)
+            if cursor:
+                params['cursor'] = cursor
 
-        response.raise_for_status()
-        data = response.json()
+            response = requests.get(
+                f'{SQUARESPACE_BASE_URL}/commerce/orders',
+                headers=headers,
+                params=params,
+                timeout=30
+            )
 
-        orders = data.get('result', [])
-        if orders:
-            return orders[0]  # Return first matching order
+            if response.status_code == 401:
+                print("ERROR: Authentication failed. Check your SQUARESPACE_API_KEY")
+                return None
+            elif response.status_code == 403:
+                print("ERROR: Access denied. Ensure you have Commerce Advanced plan")
+                return None
+
+            response.raise_for_status()
+            data = response.json()
+
+            orders = data.get('result', [])
+
+            # Search for matching order number in this batch
+            for order in orders:
+                if str(order.get('orderNumber')) == str(order_number):
+                    return order
+
+            # Check if there are more pages
+            pagination = data.get('pagination', {})
+            cursor = pagination.get('nextPageCursor')
+            if not cursor:
+                break  # No more pages
 
         print(f"WARNING: Order #{order_number} not found")
         return None
@@ -375,13 +395,17 @@ class ProductMapper:
         except Exception as e:
             print(f"Warning: Could not load product mapping: {e}")
 
-    def _normalize_variant(self, variant: str) -> str:
+    def _normalize_variant(self, variant) -> str:
         """
         Normalize variant string for matching
         Removes extra spaces, standardizes separators
         """
         if not variant:
             return ""
+        # Handle list of variants
+        if isinstance(variant, list):
+            variant = ' - '.join(str(v) for v in variant if v)
+        variant = str(variant)
         # Normalize separators and spacing
         normalized = variant.replace(',', ' -').replace('  ', ' ').strip()
         # Remove common prefixes like "Color:", "Size:", etc.
@@ -613,6 +637,37 @@ def is_in_state_order(order: Dict[str, Any], ship_from_state: str) -> bool:
     return ship_to_state == ship_from_normalized
 
 
+def parse_variant_options(variant_options) -> str:
+    """
+    Parse Squarespace variant options into a formatted string
+
+    Input: [{'optionName': 'Color', 'value': 'Black'}, {'optionName': 'Size', 'value': "1' Panel"}, ...]
+    Output: "Black - 1' Panel (12\"x12\") - 3-4 oz (1.2-1.6 mm)"
+    """
+    if not variant_options:
+        return ''
+
+    if isinstance(variant_options, str):
+        # Normalize curly quotes to straight quotes
+        variant_options = variant_options.replace('\u2018', "'").replace('\u2019', "'")  # Single quotes
+        variant_options = variant_options.replace('\u201c', '"').replace('\u201d', '"')  # Double quotes
+        return variant_options
+
+    if isinstance(variant_options, list):
+        # Extract just the values
+        values = []
+        for option in variant_options:
+            if isinstance(option, dict) and 'value' in option:
+                value = str(option['value'])
+                # Normalize curly quotes to straight quotes
+                value = value.replace('\u2018', "'").replace('\u2019', "'")  # Single quotes
+                value = value.replace('\u201c', '"').replace('\u201d', '"')  # Double quotes
+                values.append(value)
+        return ' - '.join(values)
+
+    return str(variant_options)
+
+
 def extract_pieces_from_customizations(item: Dict[str, Any]) -> int:
     """
     Extract pieces from line item customizations or variants
@@ -624,7 +679,7 @@ def extract_pieces_from_customizations(item: Dict[str, Any]) -> int:
         Number of pieces (defaults to quantity if not found)
     """
     # Check customizations for "pieces" field
-    customizations = item.get('customizations', [])
+    customizations = item.get('customizations') or []
     for custom in customizations:
         label = custom.get('label', '').lower()
         value = custom.get('value', '')
@@ -635,7 +690,10 @@ def extract_pieces_from_customizations(item: Dict[str, Any]) -> int:
                 pass
 
     # Check variant options for pieces
-    variant_options = item.get('variantOptions', '')
+    variant_options = item.get('variantOptions') or ''
+    if isinstance(variant_options, list):
+        variant_options = ' '.join(str(v) for v in variant_options if v)
+    variant_options = str(variant_options)
     if variant_options:
         # Look for patterns like "12 pieces", "24 pcs", etc.
         import re
@@ -696,7 +754,8 @@ def check_already_imported(order_numbers: List[str], log_file: str = 'import_log
 
 def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: str, income_account: str,
                       customer_matcher: Optional[CustomerMatcher] = None,
-                      sku_mapper: Optional[ProductMapper] = None) -> None:
+                      sku_mapper: Optional[ProductMapper] = None,
+                      use_ss_invoice_numbers: bool = False) -> None:
     """
     Generate IIF files for bulk invoice import to QuickBooks Desktop
 
@@ -713,12 +772,19 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         income_account: Sales/Income account name
         customer_matcher: Optional customer matcher for smart matching
         sku_mapper: Optional product mapper for item mapping
+        use_ss_invoice_numbers: If True, use Squarespace order numbers as QB invoice numbers (default: False/blank)
     """
     if not orders:
         print("No orders to export")
         return
 
     print(f"\nGenerating IIF files...")
+
+    # Show invoice numbering mode
+    if use_ss_invoice_numbers:
+        print(f"  Invoice numbering: Using Squarespace order numbers with 'SS-' prefix (e.g., SS-1001)")
+    else:
+        print(f"  Invoice numbering: Blank (manual numbering required after import)")
 
     # Track customers for reporting
     matched_customers = set()
@@ -761,28 +827,34 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             # Store customer details for CUST record (only for new customers)
             if customer_name not in customer_records:
-                # Build address lines
-                addr1 = billing.get('address1', '')
-                addr2 = billing.get('address2', '')
+                # Build address as single field with newline separators
+                addr_lines = []
+                if billing.get('address1'):
+                    addr_lines.append(billing.get('address1'))
+                if billing.get('address2'):
+                    addr_lines.append(billing.get('address2'))
                 city = billing.get('city', '')
                 state = billing.get('state', '')
                 zip_code = billing.get('postalCode', '')
+                city_state_zip = f"{city} {state} {zip_code}".strip()
+                if city_state_zip:
+                    addr_lines.append(city_state_zip)
+                if billing.get('countryCode'):
+                    addr_lines.append(billing.get('countryCode'))
 
-                # Format: Address1, Address2, City State ZIP, Country
-                addr_line3 = f"{city} {state} {zip_code}".strip() if city or state or zip_code else ''
-                country = billing.get('countryCode', '')
+                full_address = '\n'.join(addr_lines)
 
-                # Determine tax code: Illinois state tax if in-state, Non if out-of-state
+                # Determine tax code: Georgia state tax if in-state, Non if out-of-state
                 is_in_state = is_in_state_order(order, SHIP_FROM_STATE)
                 tax_code = 'Tax' if is_in_state else 'Non'  # Adjust 'Tax' to your QB tax code name
 
                 customer_records[customer_name] = {
                     'name': customer_name,
-                    'addr1': addr1[:41] if addr1 else '',
-                    'addr2': addr2[:41] if addr2 else '',
-                    'addr3': addr_line3[:41] if addr_line3 else '',
-                    'addr4': country[:41] if country else '',
-                    'addr5': '',  # Extra address line
+                    'addr1': full_address,
+                    'addr2': '',
+                    'addr3': '',
+                    'addr4': '',
+                    'addr5': '',
                     'email': email[:80] if email else '',
                     'phone': phone[:21] if phone else '',
                     'taxable': 'Y' if is_in_state else 'N',
@@ -806,8 +878,8 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
     print(f"  Creating invoice file: {invoice_filename}")
 
     with open(invoice_filename, 'w', encoding='utf-8') as f:
-        # Invoice headers with Ship To address fields
-        f.write("!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tSHIPDATE\tSHIPVIA\tREP\tSHIPTOADDR1\tSHIPTOADDR2\tSHIPTOADDR3\tSHIPTOADDR4\tSHIPTOADDR5\n")
+        # Invoice headers with Bill To (ADDR) and Ship To address fields and DOCNUM
+        f.write("!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tSHIPDATE\tSHIPVIA\tREP\tADDR1\tADDR2\tADDR3\tADDR4\tADDR5\tSHIPTOADDR1\tSHIPTOADDR2\tSHIPTOADDR3\tSHIPTOADDR4\tSHIPTOADDR5\n")
         # Line items - removed TAXABLE since customer tax code handles it
         f.write("!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tQNTY\tPRICE\tINVITEM\tOTHER1\tINVITEMDESC\n")
         f.write("!ENDTRNS\n")
@@ -848,15 +920,42 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                     customer_name = email.split('@')[0] if email else 'Guest Customer'
                 customer_name = sanitize_customer_name(customer_name)
 
+            # Get Bill To address (from billing address)
+            # QuickBooks stores full address in ADDR1 with newline separators
+            bill_lines = []
+            if billing.get('address1'):
+                bill_lines.append(billing.get('address1'))
+            if billing.get('address2'):
+                bill_lines.append(billing.get('address2'))
+            bill_city = billing.get('city') or ''
+            bill_state = billing.get('state', '')
+            bill_zip = billing.get('postalCode', '')
+            city_state_zip = f"{bill_city} {bill_state} {bill_zip}".strip()
+            if city_state_zip:
+                bill_lines.append(city_state_zip)
+            if billing.get('countryCode'):
+                bill_lines.append(billing.get('countryCode'))
+            bill_addr1 = '\n'.join(bill_lines)
+            bill_addr2 = bill_addr3 = bill_addr4 = bill_addr5 = ''
+
             # Get Ship To address
-            shipping = order.get('shippingAddress', {})
-            ship_addr1 = shipping.get('address1', '')[:41]
-            ship_addr2 = shipping.get('address2', '')[:41]
-            ship_city = shipping.get('city', '')
+            # QuickBooks stores full address in SHIPTOADDR1 with newline separators
+            shipping = order.get('shippingAddress') or {}
+            ship_lines = []
+            if shipping.get('address1'):
+                ship_lines.append(shipping.get('address1'))
+            if shipping.get('address2'):
+                ship_lines.append(shipping.get('address2'))
+            ship_city = shipping.get('city') or ''
             ship_state = shipping.get('state', '')
             ship_zip = shipping.get('postalCode', '')
-            ship_addr3 = f"{ship_city} {ship_state} {ship_zip}".strip()[:41]
-            ship_country = shipping.get('countryCode', '')[:41]
+            city_state_zip = f"{ship_city} {ship_state} {ship_zip}".strip()
+            if city_state_zip:
+                ship_lines.append(city_state_zip)
+            if shipping.get('countryCode'):
+                ship_lines.append(shipping.get('countryCode'))
+            ship_addr1 = '\n'.join(ship_lines)
+            ship_addr2 = ship_addr3 = ship_addr4 = ship_addr5 = ''
 
             # Line items
             line_items = order.get('lineItems', [])
@@ -865,17 +964,24 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             # Calculate invoice total
             invoice_total = order.get('grandTotal', {}).get('value', 0)
+            invoice_total = float(invoice_total) if invoice_total else 0.0
 
-            # TRNS line - Invoice header with Ship To address
-            f.write(f"TRNS\t\tINVOICE\t{invoice_date}\t{ar_account}\t{customer_name}\t{invoice_total}\t"
-                   f"{ship_date}\tUPS\tSHOP\t{ship_addr1}\t{ship_addr2}\t{ship_addr3}\t{ship_country}\t\n")
+            # Determine invoice number: use SS order number with prefix if flag is set, otherwise blank
+            invoice_number = f"SS-{order_number}" if use_ss_invoice_numbers else ''
+
+            # TRNS line - Invoice header with Bill To and Ship To addresses and invoice number
+            f.write(f"TRNS\t\tINVOICE\t{invoice_date}\t{ar_account}\t{customer_name}\t{invoice_total}\t{invoice_number}\t"
+                   f"{ship_date}\tUPS\tSHOP\t"
+                   f"{bill_addr1}\t{bill_addr2}\t{bill_addr3}\t{bill_addr4}\t{bill_addr5}\t"  # Bill To (ADDR1-5)
+                   f"{ship_addr1}\t{ship_addr2}\t{ship_addr3}\t{ship_addr4}\t{ship_addr5}\n")  # Ship To (SHIPTOADDR1-5)
 
             # SPL lines - Line items with product mapping, quantity, pieces, price, description
             # Tax is handled by customer tax code, not per-item
             for item in line_items:
                 # Get product info
                 product_name = item.get('productName', 'Product')
-                variant = item.get('variantOptions', '')
+                variant_raw = item.get('variantOptions', '')
+                variant = parse_variant_options(variant_raw)
 
                 # Map Squarespace product to QuickBooks item
                 if sku_mapper:
@@ -904,6 +1010,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
                 # Get price
                 unit_price = item.get('unitPricePaid', {}).get('value', 0)
+                unit_price = float(unit_price) if unit_price else 0.0
                 line_total = -(quantity * unit_price)  # Negative for QB convention
 
                 # Write line item - no TAXABLE field (customer tax code handles it)
@@ -911,6 +1018,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             # Discount line items - capture discount codes and gift cards as "Non-inventory Item"
             discounts = order.get('discountTotal', {}).get('value', 0)
+            discounts = float(discounts) if discounts else 0.0
             if discounts > 0:
                 # Get discount code info if available
                 discount_code = ''
@@ -940,18 +1048,21 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             # Freight line item - ALWAYS included, even if $0
             shipping_total = order.get('shippingTotal', {}).get('value', 0)
+            shipping_total = float(shipping_total) if shipping_total else 0.0
             f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{-shipping_total}\t1\t{shipping_total}\tFreight\t1\tShipping and handling\n")
 
             # Tax as separate line item
             tax = order.get('taxTotal', {}).get('value', 0)
+            tax = float(tax) if tax else 0.0
             if tax > 0:
                 f.write(f"SPL\t\tINVOICE\t{invoice_date}\tSales Tax Payable\t{customer_name}\t{-tax}\t1\t{tax}\tSales Tax\t0\tSales Tax\n")
 
-        f.write("ENDTRNS\n")
-        invoice_count += 1
+            # End this invoice transaction
+            f.write("ENDTRNS\n")
+            invoice_count += 1
 
-        # Log this order as imported
-        log_imported_order(order_number, invoice_filename)
+            # Log this order as imported
+            log_imported_order(order_number, invoice_filename)
 
     # Generate new customers report
     report_filename = filename.replace('.iif', '_NEW_CUSTOMERS.txt')
@@ -1017,9 +1128,9 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 unmapped_report.write("-" * 70 + "\n\n")
 
         print(f"\n{'='*60}")
-        print(f"⚠️  WARNING: {len(sku_mapper.unmapped_products)} UNMAPPED PRODUCT(S)")
+        print(f"WARNING: {len(sku_mapper.unmapped_products)} UNMAPPED PRODUCT(S)")
         print(f"{'='*60}")
-        print(f"📄 UNMAPPED PRODUCTS REPORT: {unmapped_filename}")
+        print(f"UNMAPPED PRODUCTS REPORT: {unmapped_filename}")
         print(f"\nThese products will create NEW ITEMS in QuickBooks.")
         print(f"Review the report and add mappings to sku_mapping.csv if needed.")
 
@@ -1027,52 +1138,52 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
     print(f"SUCCESS! Created IIF files:")
     print(f"{'='*60}")
     if customer_records:
-        print(f"📄 NEW CUSTOMERS: {customer_filename}")
+        print(f"NEW CUSTOMERS: {customer_filename}")
         print(f"   ({len(customer_records)} new customer(s) with tax codes)")
-    print(f"📄 INVOICES: {invoice_filename}")
+    print(f"INVOICES: {invoice_filename}")
     print(f"   ({invoice_count} invoice(s) with Ship To addresses)")
     print(f"{'='*60}")
 
     if customer_matcher:
         print(f"\nCUSTOMER SUMMARY:")
-        print(f"  ✓ EXISTING customers (matched): {len(matched_customers)}")
-        print(f"  ⚠ NEW customers (flagged): {len(new_customers)}")
+        print(f"  EXISTING customers (matched): {len(matched_customers)}")
+        print(f"  NEW customers (flagged): {len(new_customers)}")
 
         if new_customers:
             print(f"\n  NEW CUSTOMERS THAT WILL BE CREATED:")
             for name in sorted(new_customers)[:15]:
-                print(f"    • {name}")
+                print(f"    - {name}")
             if len(new_customers) > 15:
                 print(f"    ... and {len(new_customers) - 15} more")
     else:
         print(f"\nCUSTOMER SUMMARY:")
         print(f"  Customers in IIF: {len(new_customers)}")
-        print(f"  ⚠ These are FLAGGED as potentially new")
-        print(f"  ℹ QuickBooks will skip any that already exist (matches by name)")
+        print(f"  NOTE: These are FLAGGED as potentially new")
+        print(f"  INFO: QuickBooks will skip any that already exist (matches by name)")
 
         if new_customers and len(new_customers) <= 20:
             print(f"\n  CUSTOMERS IN IIF FILE:")
             for name in sorted(new_customers):
-                print(f"    • {name}")
+                print(f"    - {name}")
 
-    print(f"\n📄 NEW CUSTOMERS REPORT: {report_filename}")
+    print(f"\nNEW CUSTOMERS REPORT: {report_filename}")
 
     if sku_mapper and sku_mapper.unmapped_products:
         unmapped_filename = filename.replace('.iif', '_UNMAPPED_PRODUCTS.txt')
-        print(f"📄 UNMAPPED PRODUCTS REPORT: {unmapped_filename}")
+        print(f"UNMAPPED PRODUCTS REPORT: {unmapped_filename}")
 
     print(f"\nSALES TAX CALCULATION:")
     print(f"  Ship from state: {SHIP_FROM_STATE}")
-    print(f"  In-state orders → Taxable (Y)")
-    print(f"  Out-of-state orders → Non-taxable (N)")
+    print(f"  In-state orders: Taxable (Y)")
+    print(f"  Out-of-state orders: Non-taxable (N)")
     print(f"\nHOW IT WORKS:")
-    print(f"  1. Existing customers → Invoices created immediately")
-    print(f"  2. New customers → Customer created, THEN invoice created")
+    print(f"  1. Existing customers: Invoices created immediately")
+    print(f"  2. New customers: Customer created, THEN invoice created")
     print(f"  3. QuickBooks skips customers that already exist (by name)")
     print(f"  4. Tax status determined by ship-to address")
 
     if sku_mapper and sku_mapper.unmapped_products:
-        print(f"  5. Unmapped products → QB creates new items (review report first!)")
+        print(f"  5. Unmapped products: QB creates new items (review report first!)")
 
     print(f"\nTO IMPORT:")
     if customer_records:
@@ -1087,9 +1198,157 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         print(f"     (File > Utilities > Import > IIF Files)")
 
     if sku_mapper and sku_mapper.unmapped_products:
-        print(f"\n  ⚠️  REVIEW UNMAPPED PRODUCTS FIRST:")
+        print(f"\n  WARNING - REVIEW UNMAPPED PRODUCTS FIRST:")
         print(f"      {unmapped_filename}")
         print(f"      Add mappings to sku_mapping.csv and re-run if needed")
+
+
+def create_encrypted_zip(files: List[str], zip_filename: str, password: str) -> str:
+    """
+    Create a password-protected ZIP file with AES-256 encryption
+
+    Args:
+        files: List of file paths to include in the ZIP
+        zip_filename: Output ZIP filename
+        password: Password for encryption
+
+    Returns:
+        Path to created ZIP file
+    """
+    try:
+        import pyzipper
+    except ImportError:
+        print("ERROR: pyzipper not installed. Installing...")
+        import subprocess
+        subprocess.check_call(['pip', 'install', 'pyzipper'])
+        import pyzipper
+
+    with pyzipper.AESZipFile(zip_filename, 'w', compression=pyzipper.ZIP_DEFLATED,
+                              encryption=pyzipper.WZ_AES) as zf:
+        zf.setpassword(password.encode('utf-8'))
+        for file_path in files:
+            if os.path.exists(file_path):
+                zf.write(file_path, os.path.basename(file_path))
+
+    return zip_filename
+
+
+def get_gmail_oauth_token(token_file: str = 'gmail_token.json') -> str:
+    """
+    Get OAuth2 access token for Gmail using Google Sign-In.
+    Handles initial authentication and token refresh.
+
+    Args:
+        token_file: Path to store refresh token
+
+    Returns:
+        Access token for Gmail API
+    """
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError:
+        print("Installing required Google auth libraries...")
+        import subprocess
+        subprocess.check_call(['pip', 'install', 'google-auth-oauthlib', 'google-auth-httplib2', 'google-api-python-client'])
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+
+    SCOPES = ['https://www.googleapis.com/auth/gmail.send']
+    creds = None
+
+    # Load existing token
+    if os.path.exists(token_file):
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+
+    # Refresh or get new token
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            print("Refreshing Gmail access token...")
+            creds.refresh(Request())
+        else:
+            # Need OAuth2 credentials file
+            creds_file = 'gmail_credentials.json'
+            if not os.path.exists(creds_file):
+                print("\nERROR: gmail_credentials.json not found!")
+                print("\nTo set up Gmail OAuth2:")
+                print("1. Go to: https://console.cloud.google.com/")
+                print("2. Create a new project (or select existing)")
+                print("3. Enable Gmail API")
+                print("4. Create OAuth 2.0 Client ID (Desktop app)")
+                print("5. Download credentials as 'gmail_credentials.json'")
+                print("6. Place file in this directory")
+                raise FileNotFoundError("gmail_credentials.json not found")
+
+            print("\nOpening browser for Google Sign-In...")
+            print("Please authorize the application to send emails on your behalf.")
+            flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        # Save token for future use
+        with open(token_file, 'w') as token:
+            token.write(creds.to_json())
+
+    return creds.token
+
+
+def send_email_with_attachment_oauth(recipient: str, subject: str, body: str, attachment_path: str,
+                                      sender_email: str) -> None:
+    """
+    Send email with attachment via Gmail using OAuth2
+
+    Args:
+        recipient: Email address to send to
+        subject: Email subject
+        body: Email body text
+        attachment_path: Path to file to attach
+        sender_email: Sender's Gmail address
+    """
+    # Get OAuth2 access token
+    access_token = get_gmail_oauth_token()
+
+    # Create message
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient
+    msg['Subject'] = subject
+
+    # Add body
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Add attachment
+    with open(attachment_path, 'rb') as f:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(attachment_path)}')
+    msg.attach(part)
+
+    # Send email using OAuth2
+    import base64
+    from email.mime.text import MIMEText
+
+    # Encode message
+    raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
+
+    # Send via Gmail API
+    try:
+        from googleapiclient.discovery import build
+        from google.oauth2.credentials import Credentials
+    except ImportError:
+        import subprocess
+        subprocess.check_call(['pip', 'install', 'google-api-python-client'])
+        from googleapiclient.discovery import build
+        from google.oauth2.credentials import Credentials
+
+    # Create credentials from token
+    creds = Credentials(token=access_token)
+    service = build('gmail', 'v1', credentials=creds)
+
+    message = {'raw': raw_message}
+    service.users().messages().send(userId='me', body=message).execute()
 
 
 def main():
@@ -1138,9 +1397,9 @@ def main():
             new_orders, already_imported = check_already_imported(order_nums)
 
             if already_imported:
-                print(f"\n⚠️  WARNING: {len(already_imported)} order(s) already imported:")
+                print(f"\nWARNING: {len(already_imported)} order(s) already imported:")
                 for num in already_imported[:10]:
-                    print(f"  • Order #{num}")
+                    print(f"  - Order #{num}")
                 if len(already_imported) > 10:
                     print(f"  ... and {len(already_imported) - 10} more")
                 print(f"\nSkipping {len(already_imported)} duplicate(s), importing {len(new_orders)} new order(s)")
@@ -1160,9 +1419,9 @@ def main():
         new_orders, already_imported = check_already_imported(order_list)
 
         if already_imported:
-            print(f"\n⚠️  WARNING: {len(already_imported)} order(s) already imported:")
+            print(f"\nWARNING: {len(already_imported)} order(s) already imported:")
             for num in already_imported:
-                print(f"  • Order #{num} - SKIPPING (already in import_log.csv)")
+                print(f"  - Order #{num} - SKIPPING (already in import_log.csv)")
             print()
 
         if new_orders:
@@ -1171,9 +1430,9 @@ def main():
                 order = fetch_specific_order(order_num)
                 if order:
                     orders.append(order)
-                    print(f"  ✓ Order #{order_num} - {order.get('customerEmail', 'N/A')}")
+                    print(f"  [OK] Order #{order_num} - {order.get('customerEmail', 'N/A')}")
                 else:
-                    print(f"  ✗ Order #{order_num} - Not found")
+                    print(f"  [NOT FOUND] Order #{order_num}")
 
             print(f"\nFetched {len(orders)} of {len(new_orders)} requested orders")
         else:
@@ -1214,41 +1473,98 @@ def main():
         output_file = f"squarespace_invoices_{args.start_date}_to_{args.end_date}.iif"
 
     # Generate IIF file
-    generate_iif_file(orders, output_file, args.ar_account, args.income_account, customer_matcher, sku_mapper)
+    generate_iif_file(orders, output_file, args.ar_account, args.income_account, customer_matcher, sku_mapper, args.use_ss_invoice_numbers)
 
     # Email if requested
-    if args.email or (args.fulfilled_today and EMAIL_USER and EMAIL_PASSWORD):
-        recipient = args.email or EMAIL_RECIPIENT
-        report_file = output_file.replace('.iif', '_NEW_CUSTOMERS.txt')
+    if args.email:
+        # Get sender email from environment or prompt
+        sender_email = EMAIL_USER or input("Enter your Gmail address: ").strip()
+        if not sender_email:
+            print("\nERROR: Sender email address required")
+            return
 
-        # Import email helper
+        recipient = args.email
+        print(f"\n{'='*60}")
+        print(f"SENDING ENCRYPTED EMAIL")
+        print(f"{'='*60}")
+
         try:
-            from email_helper import send_iif_email
+            # Generate random password for ZIP encryption
+            import secrets
+            import string
+            alphabet = string.ascii_letters + string.digits + string.punctuation
+            zip_password = ''.join(secrets.choice(alphabet) for _ in range(16))
 
-            # Count new customers from the report file
-            new_customer_count = 0
-            try:
-                with open(report_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if line.startswith('NEW CUSTOMERS (flagged):'):
-                            new_customer_count = int(line.split(':')[1].strip())
-                            break
-            except:
-                pass
+            # Collect all files to send
+            files_to_send = []
+            invoice_file = output_file.replace('.iif', '_INVOICES.iif')
+            customer_file = output_file.replace('.iif', '_NEW_CUSTOMERS.iif')
+            report_file = output_file.replace('.iif', '_NEW_CUSTOMERS.txt')
 
-            send_iif_email(
-                iif_file=output_file,
-                report_file=report_file,
+            if os.path.exists(invoice_file):
+                files_to_send.append(invoice_file)
+            if os.path.exists(customer_file):
+                files_to_send.append(customer_file)
+            if os.path.exists(report_file):
+                files_to_send.append(report_file)
+
+            if not files_to_send:
+                print("ERROR: No files to send")
+                return
+
+            # Create encrypted ZIP
+            zip_filename = output_file.replace('.iif', '_ENCRYPTED.zip')
+            print(f"Creating encrypted ZIP: {zip_filename}")
+            create_encrypted_zip(files_to_send, zip_filename, zip_password)
+
+            # Send email
+            subject = f"QuickBooks IIF Files - {datetime.now().strftime('%Y-%m-%d')}"
+            body = f"""QuickBooks IIF files are attached in an encrypted ZIP file.
+
+Files included:
+{chr(10).join(['  - ' + os.path.basename(f) for f in files_to_send])}
+
+Order count: {len(orders)}
+
+IMPORTANT: The ZIP file is password-protected with AES-256 encryption.
+Password: {zip_password}
+
+(Store this password securely - it will not be sent again)
+
+Import instructions:
+1. Extract the ZIP file using the password above
+2. Import customers first: {os.path.basename(customer_file) if os.path.exists(customer_file) else 'N/A'}
+3. Import invoices second: {os.path.basename(invoice_file)}
+"""
+
+            print(f"Sending email to: {recipient}")
+            print(f"From: {sender_email}")
+            send_email_with_attachment_oauth(
                 recipient=recipient,
-                invoice_count=len(orders),
-                new_customer_count=new_customer_count,
-                smtp_host=EMAIL_HOST,
-                smtp_port=EMAIL_PORT,
-                smtp_user=EMAIL_USER,
-                smtp_password=EMAIL_PASSWORD
+                subject=subject,
+                body=body,
+                attachment_path=zip_filename,
+                sender_email=sender_email
             )
+
+            print(f"\n{'='*60}")
+            print(f"EMAIL SENT SUCCESSFULLY")
+            print(f"{'='*60}")
+            print(f"Recipient: {recipient}")
+            print(f"Attachment: {zip_filename}")
+            print(f"\nZIP PASSWORD: {zip_password}")
+            print(f"{'='*60}")
+            print(f"\nIMPORTANT: Share this password with the recipient via a")
+            print(f"separate secure channel (text, phone call, etc.)")
+            print(f"{'='*60}")
+
+        except FileNotFoundError as e:
+            print(f"\nERROR: {e}")
+            print("\nSee EMAIL_SETUP.md for detailed setup instructions")
         except Exception as e:
-            print(f"Email failed: {e}")
+            print(f"\nERROR: Email failed: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 if __name__ == "__main__":
