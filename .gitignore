@@ -24,8 +24,8 @@ Thumbs.db
 .claude/
 
 # Customer data and import tracking (local only, not committed)
-customers.csv
-import_log.csv
+data/customers.csv
+config/import_log.csv
 
 # Generated IIF files
 *.iif
@@ -34,5 +34,5 @@ import_log.csv
 *_ENCRYPTED.zip
 
 # Gmail OAuth credentials (NEVER commit these!)
-gmail_credentials.json
-gmail_token.json
+config/gmail_credentials.json
+config/gmail_token.json
