@@ -1,0 +1,196 @@
+date,source,customer_name,customer_email,gross_amount,processing_fee,net_amount,transaction_id
+2025-11-15,Stripe,Jared Phelps,mutual.forest.4k@icloud.com,85.5,2.78,82.72,ch_3STwmsJoK2H5viIh0mby3ATB
+2025-11-15,Stripe,Jared Phelps,phelpsjared@gmail.com,85.5,0,85.5,py_3STpDNJoK2H5viIh0PedNPXY
+2025-11-15,Stripe,Jared Phelps,phelpsjared@gmail.com,85.5,0,85.5,py_3STovjJoK2H5viIh0YNlwF2t
+2025-11-15,Stripe,Chris Middleton,middleton.christen@gmail.com,298.1,8.94,289.16,ch_3SToCVJoK2H5viIh1Mi5aHT4
+2025-11-15,Stripe,Robert DelFierro,bobdelfierro@hotmail.com,155.56,4.81,150.75,ch_3STmHwJoK2H5viIh1CmPwBQK
+2025-11-15,Stripe,Jeffrey Boldt,jmb79@sbccglobal.net,40.5,1.47,39.03,ch_3STmGgJoK2H5viIh0KKmVxT4
+2025-11-15,Stripe,Mark Karpenko,mark@karpenko-us.com,362.9,10.82,352.08,ch_3STlpWJoK2H5viIh1N7vupoI
+2025-11-15,PayPal,James Jacenko,jamesjacenko@gmail.com,71.0,4.03,66.97,5DH02695H3562600N
+2025-11-15,PayPal,Brian Dean Woods,woodsbriand@hotmail.com,870.95,30.89,840.0600000000001,76B416910K860901W
+2025-11-15,PayPal,N/A,p4pmp_c083433c-8a87-43c1-82eb-8dd90d6a55da@intuit.com,200.0,0.0,200.0,8RM76161NR034822J
+2025-11-15,PayPal,LeAnne Little,mei_lmlztzk102005@yahoo.com,135.0,5.2,129.8,9W03804961073473V
+2025-11-15,PayPal,Timothy Singler,tsingler60@gmail.com,72.0,3.0,69.0,3GK09706PF356601N
+2025-11-15,PayPal,Nazir Hashimi,hashiminaz@outlook.com,108.0,4.26,103.74,4T7438705J2345613
+2025-11-15,PayPal,Salvador Torres,salvador.torres.jr89@gmail.com,81.0,3.32,77.68,84T58740D7902452D
+2025-11-15,PayPal,Larry Gaddis,ldg1971@yahoo.com,252.0,9.28,242.72,6Y875155GP4093846
+2025-11-15,PayPal,Katie Koeman,shepherdklyn@gmail.com,117.0,4.57,112.43,8A4718175D063953N
+2025-11-15,PayPal,carl curtis,curtisracing5@gmail.com,135.0,5.2,129.8,4DF69054JE531925D
+2025-11-15,PayPal,Eric Steffek,steffeke16@gmail.com,756.0,26.87,729.13,37G51657SK5094341
+2025-11-15,PayPal,Bob Shea,bobsheaii@gmail.com,1597.5,56.24,1541.26,6MV63415SF777232A
+2025-11-15,PayPal,Kathleen Cook,katekanecook@gmail.com,135.0,5.2,129.8,5R815131WD751263X
+2025-11-15,PayPal,Jason Self,jbself@gmail.com,252.0,9.28,242.72,7T01937489415420W
+2025-11-15,PayPal,Jackson Holterman,holtyj1@gmail.com,135.0,5.2,129.8,3AT719715B287711S
+2025-11-15,PayPal,jeffery mcghee,jeffery.g.mcghee@gmail.com,818.61,29.06,789.5500000000001,06274213M4023424D
+2025-11-15,PayPal,carl curtis,curtisracing5@gmail.com,117.0,4.57,112.43,6E1079098D438561L
+2025-11-15,PayPal,Marin Gamboa,marin.gamboa@yahoo.com,135.0,5.2,129.8,4S878198ET758010Y
+2025-11-15,PayPal,heidi lamb,heidi.brooke@yahoo.com,117.0,4.57,112.43,09J64673VT930962N
+2025-11-15,PayPal,N/A,dudetteshow@gmail.com,396.0,14.31,381.69,31120129M65472256
+2025-11-15,PayPal,heidi lamb,heidi.brooke@yahoo.com,756.0,26.87,729.13,4V0134146E3961815
+2025-11-15,PayPal,N/A,dudetteshow@gmail.com,288.0,10.54,277.46,0R552958UF0688119
+2025-11-15,PayPal,jeffery mcghee,jeffery.g.mcghee@gmail.com,832.93,29.56,803.37,04B738306Y8832613
+2025-11-15,PayPal,Sarah Daniels,sarahmariedaniels7@gmail.com,207.5,7.73,199.77,4LT01950V9486460W
+2025-11-15,PayPal,N/A,russellconte@gmail.com,377.1,13.65,363.45000000000005,61P92216675778700
+2025-11-15,PayPal,N/A,s.steineck@abbeyspring.com,104.4,4.13,100.27000000000001,8LV1141177033710Y
+2025-11-15,PayPal,James Jacenko,jamesjacenko@gmail.com,29.95,1.54,28.41,01A272405G6901137
+2025-11-15,PayPal,Andrew Quintana,andrewq85@gmail.com,317.52,11.57,305.95,8D2597313B923303T
+2025-11-15,PayPal,N/A,buffalohydeandhooks@gmail.com,567.0,20.28,546.72,130276407V699001T
+2025-11-15,PayPal,Babette LeBlanc,babbie04@frontiernet.net,36.0,1.75,34.25,49C11943M75220244
+2025-11-15,PayPal,Cindy Hu,adcindy@gmail.com,72.0,3.0,69.0,2W0941384J673974R
+2025-11-15,PayPal,heidi lamb,heidi.brooke@yahoo.com,864.0,30.64,833.36,8FU83012R1867374A
+2025-11-15,PayPal,Michael Land,mike.land72@yahoo.com,450.0,16.2,433.8,6FP14431JY464912T
+2025-11-15,PayPal,Sarah Van Sciver,soupydoop77@yahoo.com,630.0,22.48,607.52,0YY50796MC244743A
+2025-11-15,PayPal,Julie Phillip,jules75@earthlink.net,387.0,14.0,373.0,5V260280C2560235N
+2025-11-16,Stripe,Jake Houston,houstonbootco@gmail.com,245.0,7.41,237.59,ch_3SUL4pJoK2H5viIh150b1kg1
+2025-11-16,Stripe,Charles Chase,crchase1@yahoo.com,50.0,1.75,48.25,ch_3SUF1gJoK2H5viIh1fKGTUjY
+2025-11-16,Stripe,Brian Irwin,niwrib@gmail.com,241.0,7.29,233.71,ch_3SUCYkJoK2H5viIh1Hujmw19
+2025-11-16,Stripe,Julie Powell,skywolfpowell@gmail.com,233.5,7.07,226.43,ch_3SUBhJJoK2H5viIh1TsTbr4O
+2025-11-17,Stripe,Brady Ramsey,pondhawkleather@gmail.com,50.0,1.75,48.25,ch_3SUgX8JoK2H5viIh0dwc6moo
+2025-11-17,Stripe,jacob ross,jacobross101@gmail.com,331.0,9.9,321.1,ch_3SUX6eJoK2H5viIh002vqNbV
+2025-11-17,Stripe,Steven Juell,juellguitars@gmail.com,241.0,7.29,233.71,ch_3SUWI7JoK2H5viIh04yN62yl
+2025-11-17,Stripe,Damiano Carlino,falotico@aol.com,240.14,7.26,232.88,ch_3SUVmaJoK2H5viIh0YxAytYL
+2025-11-17,Stripe,Brian  Christopher,info@bicyclettefurniture.com,1247.0,36.46,1210.54,ch_3SUUiXJoK2H5viIh0JttiYve
+2025-11-17,Stripe,Abram Castellanos,,221.0,6.71,214.29,ch_3SUT43JoK2H5viIh0buYValn
+2025-11-18,Stripe,Alejandro Hernandez,alhernandez23@gmail.com,206.1,6.28,199.82,ch_3SV4ApJoK2H5viIh1rM6kMCV
+2025-11-18,Stripe,Scott Benson,skbpayments@icloud.com,72.0,2.39,69.61,ch_3SV415JoK2H5viIh0n1jtUYd
+2025-11-18,Stripe,Brandon Arlington,arlingtonleathergoods@gmail.com,59.0,2.01,56.99,ch_3SV22bJoK2H5viIh0hAG8sgk
+2025-11-18,Stripe,Miguel Espinoza,maespinoza2@gmail.com,117.0,3.69,113.31,ch_3SV1zPJoK2H5viIh0arJoFBe
+2025-11-18,Stripe,Alex Hall,alex.do@me.com,117.0,3.69,113.31,ch_3SV0xhJoK2H5viIh1ZLLfj6r
+2025-11-18,Stripe,Benjamin Sweeney,reliablecorporation.agonizing387@passmail.net,1749.9,51.05,1698.85,ch_3SV0EQJoK2H5viIh0kuw7KdM
+2025-11-18,Stripe,Cameron Camp,cccampff@gmail.com,58.5,2.0,56.5,ch_3SV0DlJoK2H5viIh1ty3ultY
+2025-11-18,Stripe,Michelle F,cepalema@gmail.com,134.1,4.19,129.91,ch_3SV04OJoK2H5viIh0awWeC8s
+2025-11-18,Stripe,Alysia Rines,evandcorona@gmail.com,268.2,8.08,260.12,ch_3SUzsCJoK2H5viIh0PxOK0rA
+2025-11-18,Stripe,Jones Bazalgette,jnb62@cornell.edu,72.0,2.39,69.61,ch_3SUzqzJoK2H5viIh0O7GbKjT
+2025-11-18,Stripe,Brian Paquette,brianwpaquette@gmail.com,720.0,21.18,698.82,ch_3SUzo9JoK2H5viIh19YaHQqW
+2025-11-18,Stripe,Spencer Cunningham,spencercunninghamsjc@gmail.com,1100.7,32.22,1068.48,ch_3SUyYeJoK2H5viIh0Y3k5LyR
+2025-11-18,Stripe,jacob ross,jacobross101@gmail.com,299.0,8.97,290.03,ch_3SUyMOJoK2H5viIh1KC4zbSL
+2025-11-18,Stripe,Francis Waplinger,fbwmatix@mac.com,36.0,1.34,34.66,ch_3SUxTpJoK2H5viIh1kTWKZgs
+2025-11-18,Stripe,Derek Davidson,mshoemaker@statewidemortgage.com,269.1,8.1,261.0,ch_3SUwkdJoK2H5viIh1A3f1kMs
+2025-11-18,Stripe,Colin Murdy,colin.murdy@murdycreative.co,246.6,7.45,239.15,ch_3SUwbpJoK2H5viIh0tx05tcZ
+2025-11-18,Stripe,Jennifer Ivey,jenniferivey@icloud.com,117.0,3.69,113.31,ch_3SUwPyJoK2H5viIh1NlNsEJA
+2025-11-18,Stripe,William Moriarity,,380.0,11.32,368.68,ch_3SUwDTJoK2H5viIh1Lg8sdka
+2025-11-18,Stripe,Robert Duguay,,153.0,4.74,148.26,ch_3SUw7HJoK2H5viIh1xDrG4qV
+2025-11-18,Stripe,Mark Bender,markbender.mpb@gmail.com,337.5,10.09,327.41,ch_3SUvqGJoK2H5viIh1EVVZ3z3
+2025-11-18,Stripe,Daniel Bridgman,dcb58@icloud.com,72.0,2.39,69.61,ch_3SUvDUJoK2H5viIh1qB5Wo4D
+2025-11-18,Stripe,Doug Talbot,ammodawg7@gmail.com,4275.0,124.28,4150.72,ch_3SUv7dJoK2H5viIh0HkbAQVi
+2025-11-18,Stripe,Roger Callese,rcallese1@gmail.com,450.0,13.35,436.65,ch_3SUv51JoK2H5viIh05SJX6ff
+2025-11-18,Stripe,Daniel Yohe,fr_paschal@ewtn.com,299.0,8.97,290.03,ch_3SUukDJoK2H5viIh1YZZfmcz
+2025-11-18,Stripe,Calvin Breeze Jr,baldpoet1743@gmail.com,36.0,1.34,34.66,ch_3SUuhsJoK2H5viIh00Osft18
+2025-11-18,Stripe,Jonathan Ward,saplingmakerlab@gmail.com,72.0,2.39,69.61,ch_3SUuckJoK2H5viIh1J8tA86b
+2025-11-18,Stripe,Richard Grecu,rtrek97@hotmail.com,234.0,7.09,226.91,ch_3SUuLfJoK2H5viIh0eJar2B9
+2025-11-18,Stripe,Brady Pfeiffer,brady@northofzion.com,153.0,4.74,148.26,ch_3SUuIAJoK2H5viIh0fLDyw9x
+2025-11-18,Stripe,Ronnie Laehn,ronald.laehn@gmail.com,117.0,3.69,113.31,ch_3SUu7yJoK2H5viIh1fabwXtJ
+2025-11-18,Stripe,Ankeet Patel,ankeetpatel21@gmail.com,170.1,5.23,164.87,ch_3SUu4pJoK2H5viIh1Eo7unxU
+2025-11-18,Stripe,Leigh Culley,leigh@frieseandroot.com,36.0,1.34,34.66,ch_3SUu4iJoK2H5viIh0QxUN8ow
+2025-11-18,Stripe,Reid Eyler,reideyler@gmail.com,594.0,17.53,576.47,ch_3SUu2ZJoK2H5viIh1a1DMHYp
+2025-11-18,Stripe,Jesse Padilla-Goryl,jesse.goryl@gmail.com,109.1,3.46,105.64,ch_3SUtnvJoK2H5viIh1DiF1aQp
+2025-11-18,Stripe,David Walt,dailyseedco@gmail.com,351.0,10.48,340.52,ch_3SUti6JoK2H5viIh1dFqaaQx
+2025-11-18,Stripe,Jack Weber,jackweber@gmail.com,234.0,7.09,226.91,ch_3SUthdJoK2H5viIh0BfB3Kak
+2025-11-18,Stripe,Bryan Cleveland,basilcleveland@gmail.com,72.0,2.39,69.61,ch_3SUthFJoK2H5viIh0uKW6dy8
+2025-11-18,Stripe,Alex Heyer,grouselakeleather@gmail.com,252.0,7.61,244.39,ch_3SUtUEJoK2H5viIh0B0ZK2Q6
+2025-11-18,Stripe,Karen Squires,karen@squirescanvascreations.com,1044.0,30.58,1013.42,ch_3SUtPSJoK2H5viIh08142I3z
+2025-11-18,Stripe,Ayden Damms,aydend2003@gmail.com,233.0,7.06,225.94,ch_3SUtFeJoK2H5viIh0Lcciawm
+2025-11-18,Stripe,salim kai,,493.0,14.6,478.4,ch_3SUt8SJoK2H5viIh0T6wpuc6
+2025-11-18,Stripe,Eugenie  Norris ,sirron64@yahoo.com,119.07,3.75,115.32,ch_3SUt79JoK2H5viIh0VZOPX9P
+2025-11-18,Stripe,Vansa Shewakramani Hanson,vansas@gmail.com,144.0,4.48,139.52,ch_3SUt5AJoK2H5viIh05IeG4qM
+2025-11-18,Stripe,Chase Lilly,Chase.Lilly@gmail.com,157.5,4.87,152.63,ch_3SUt3hJoK2H5viIh1B0k0Yvl
+2025-11-18,Stripe,William Masson,Massonwc@gmail.com,72.0,2.39,69.61,ch_3SUt1FJoK2H5viIh1L1Y2Mqv
+2025-11-18,Stripe,Olivia Locke,oliviavlocke@gmail.com,120.0,5.58,114.42,ch_3SUsvKJoK2H5viIh0t8LsBqH
+2025-11-18,Stripe,Ankeet Patel,ankeetpatel21@gmail.com,134.1,4.19,129.91,ch_3SUsqtJoK2H5viIh18X6ZMq9
+2025-11-18,Stripe,Heidle  Smith,hcsmith2001@yahoo.com,50.0,1.75,48.25,ch_3SUsqmJoK2H5viIh0aVYlTYu
+2025-11-18,Stripe,Emily  Boksenbaum,underhillleather@gmail.com,249.0,7.52,241.48,ch_3SUshVJoK2H5viIh0UgKoUCc
+2025-11-18,Stripe,Todd Haddaway,todd.haddaway@gmail.com,72.0,2.39,69.61,ch_3SUsdlJoK2H5viIh0pipK14c
+2025-11-18,Stripe,Mike Briggs,mbriggs985@gmail.com,72.0,2.39,69.61,ch_3SUsZeJoK2H5viIh0oTuZqvA
+2025-11-18,Stripe,Richard  Strother ,,89.0,2.88,86.12,ch_3SUsY1JoK2H5viIh0qcyfyWi
+2025-11-18,Stripe,Michelle F,cepalema@gmail.com,72.0,2.39,69.61,ch_3SUsVfJoK2H5viIh0Lu8Q3Aa
+2025-11-18,Stripe,derek davidson,derekdavidson26@hotmail.com,708.3,20.84,687.46,ch_3SUsUFJoK2H5viIh1OgYdluM
+2025-11-18,Stripe,Ranee Lemke,blackhoofvalleyleather@gmail.com,171.0,5.26,165.74,ch_3SUsQSJoK2H5viIh1ghyjrsd
+2025-11-18,Stripe,Robert Dorman,r.michael.dorman@gmail.com,144.0,4.48,139.52,ch_3SUsKKJoK2H5viIh0oOZB60K
+2025-11-18,Stripe,Roy Hamblen,heyrah@hotmail.com,36.0,1.34,34.66,ch_3SUsJaJoK2H5viIh1nwcWoF4
+2025-11-18,Stripe,Robert Dorman,r.michael.dorman@gmail.com,252.0,7.61,244.39,ch_3SUsDwJoK2H5viIh0VKENgOF
+2025-11-18,Stripe,Matthew Neal,saxman242@gmail.com,287.1,8.63,278.47,ch_3SUsDCJoK2H5viIh035nuRGr
+2025-11-18,Stripe,Joel Sokoloff,jsokokiff03@gmail.com,516.5,15.28,501.22,ch_3SUsCyJoK2H5viIh0vO01rfS
+2025-11-18,Stripe,Jones Bazalgette,jnb62@cornell.edu,72.0,2.39,69.61,ch_3SUsAzJoK2H5viIh0Aw9FL8l
+2025-11-18,Stripe,Aaron Hoffmann,noraah@gmail.com,630.0,18.57,611.43,ch_3SUs99JoK2H5viIh05cBdjTM
+2025-11-18,Stripe,Jeremy Jones,,1885.5,54.98,1830.52,ch_3SUs8EJoK2H5viIh1ptfJNnI
+2025-11-18,Stripe,Aarti  Sharma,rt.sharma87@gmail.com,536.4,15.86,520.54,ch_3SUs6sJoK2H5viIh0ANg2pxL
+2025-11-18,Stripe,Michael Perez-Colunga,michaelcolunga2@gmail.com,72.0,2.39,69.61,ch_3SUs5yJoK2H5viIh1Ue0PzqP
+2025-11-18,Stripe,David Peterson,petersonandco@gmail.com,72.0,2.39,69.61,ch_3SUs2cJoK2H5viIh1EpTrVty
+2025-11-18,Stripe,William Masson,Massonwc@gmail.com,144.0,4.48,139.52,ch_3SUs1TJoK2H5viIh0cMag7sg
+2025-11-18,Stripe,Jason Conway,jason.conway@hotmail.com,171.0,5.26,165.74,ch_3SUrzHJoK2H5viIh1SUsVfu2
+2025-11-18,Stripe,Justin Thomas,jthomas7106@yahoo.com,153.0,4.74,148.26,ch_3SUrzAJoK2H5viIh0s60gGxw
+2025-11-18,Stripe,Jerry Teddy,jrteddy@gmail.com,135.0,4.22,130.78,ch_3SUryzJoK2H5viIh00hDWTbp
+2025-11-18,Stripe,Joel Delassus,jaydela_180@hotmail.com,39.69,1.45,38.24,ch_3SUrwYJoK2H5viIh0Ij8EZHc
+2025-11-18,Stripe,Leslie  Rawson ,Faithandhideleather@gmail.com,360.0,10.74,349.26,ch_3SUrwAJoK2H5viIh1AF1k4LN
+2025-11-18,Stripe,Jerry Teddy,jrteddy@gmail.com,117.0,3.69,113.31,ch_3SUrvuJoK2H5viIh0MI1Oddn
+2025-11-18,Stripe,Eugenie  Norris ,sirron64@yahoo.com,694.57,20.44,674.13,ch_3SUrv5JoK2H5viIh1rsmZRUl
+2025-11-18,Stripe,Ron Wike,ronwike.jr@gmail.com,117.0,3.69,113.31,ch_3SUrswJoK2H5viIh1y9YPuS0
+2025-11-18,Stripe,J Lin,jiageng_lin@outlook.com,72.0,2.39,69.61,ch_3SUrq7JoK2H5viIh0auHKswM
+2025-11-18,Stripe,Kirby Baylin,KirbyRemingtonBaylin@gmail.com,1494.0,43.63,1450.37,ch_3SUrpAJoK2H5viIh1blwGRho
+2025-11-18,Stripe,Kimberly Walls,kim.walls1@gmail.com,586.0,17.29,568.71,ch_3SUroFJoK2H5viIh0jrjvKnk
+2025-11-18,Stripe,Aaron L McCarter,aaron@maryvillevineyard.com,117.0,3.69,113.31,ch_3SUrmMJoK2H5viIh1Tm9LqFU
+2025-11-18,Stripe,Corey Cantwell,corey.cantwell@gmail.com,120.0,3.78,116.22,ch_3SUrkLJoK2H5viIh1UlslueW
+2025-11-18,Stripe,Michael Gregg,shkibby@gmail.com,630.0,18.57,611.43,ch_3SUrjRJoK2H5viIh1BU43Bu3
+2025-11-18,Stripe,Michael Varjan,mikey8789@yahoo.com,297.68,8.93,288.75,ch_3SUriyJoK2H5viIh1AjpM7SR
+2025-11-18,Stripe,SuAnn Cook,secook@windstream.net,133.0,4.16,128.84,ch_3SUrhqJoK2H5viIh1FLORaFM
+2025-11-18,Stripe,Mengxi Li-Reznicek,budlayla@gmail.com,296.68,8.9,287.78,ch_3SUrgiJoK2H5viIh1YaB4E94
+2025-11-18,Stripe,Chris Parsley,cparsley6407@sbcglobal.net,369.0,11.0,358.0,ch_3SUrgWJoK2H5viIh1AL8rj4D
+2025-11-18,Stripe,Barry Griffith,griffithmarkk@gmail.com,36.0,1.34,34.66,ch_3SUrgBJoK2H5viIh1IuqwmF6
+2025-11-18,Stripe,tyler birch,muscles156@gmail.com,828.0,24.31,803.69,ch_3SUrfPJoK2H5viIh1hciPRYJ
+2025-11-18,Stripe,Amil Masic,amil.masic@gmail.com,268.2,8.08,260.12,ch_3SUreZJoK2H5viIh1Rcuyee2
+2025-11-18,Stripe,Julie  Zigment ,whinnywoofwhiskers@yahoo.com,630.0,18.57,611.43,ch_3SUrduJoK2H5viIh1yvyqyzf
+2025-11-18,Stripe,Flavio Alvarez,srminimo@yahoo.com,81.0,2.65,78.35,ch_3SUrdhJoK2H5viIh1yg8gV5z
+2025-11-18,Stripe,James Lockhart,kclbass@yahoo.com,337.5,10.09,327.41,ch_3SUrdgJoK2H5viIh08arXOdX
+2025-11-18,Stripe,Daniel Doctorian,dandocto@gmail.com,79.38,2.6,76.78,ch_3SUrcuJoK2H5viIh0SZ7bnKh
+2025-11-18,Stripe,Chris Metcalfe,chrismetcalfe@jacobslawteam.com,450.0,13.35,436.65,ch_3SUrcsJoK2H5viIh0jmVLmCi
+2025-11-18,Stripe,Robbie Watson,robbiedon.watson@gmail.com,549.0,16.22,532.78,ch_3SUrcLJoK2H5viIh1REYzsc2
+2025-11-18,Stripe,Ron Wike,ronwike.jr@gmail.com,207.0,6.3,200.7,ch_3SUrbdJoK2H5viIh0BIuqhV9
+2025-11-18,Stripe,Corban Lamb,csldubai2010@gmail.com,135.0,4.22,130.78,ch_3SUrbaJoK2H5viIh0gxMKQqz
+2025-11-18,Stripe,Amil Masic,amil.masic@gmail.com,270.0,8.13,261.87,ch_3SUrb4JoK2H5viIh1cev7ush
+2025-11-18,Stripe,Chris Williamson,sparky22go@gmail.com,193.0,5.9,187.1,ch_3SUrayJoK2H5viIh1uLb1hxI
+2025-11-18,Stripe,Chase Lilly,Chase.Lilly@gmail.com,135.0,4.22,130.78,ch_3SUraNJoK2H5viIh0dUzCGVr
+2025-11-18,Stripe,Lucas Grenda,LJGRENDA@gmail.com,117.0,3.69,113.31,ch_3SUraAJoK2H5viIh1ssxHvfn
+2025-11-18,Stripe,Adam Wolfe,,675.0,19.88,655.12,ch_3SUrZSJoK2H5viIh14APKwZI
+2025-11-18,Stripe,Julie  Zigment ,whinnywoofwhiskers@yahoo.com,670.5,19.74,650.76,ch_3SUrZKJoK2H5viIh10BtBQ3H
+2025-11-18,Stripe,Jennifer Concepcion,jennifer.semel@gmail.com,135.0,4.22,130.78,ch_3SUrZEJoK2H5viIh0hfwD3Ty
+2025-11-18,Stripe,Chase Lilly,Chase.Lilly@gmail.com,117.0,3.69,113.31,ch_3SUrZ2JoK2H5viIh19Nnibji
+2025-11-18,Stripe,Trenton Hill,trentlh@yahoo.com,657.0,19.35,637.65,ch_3SUrYdJoK2H5viIh0V5DoShV
+2025-11-18,Stripe,Lenny Leclercq,lleclercq42@gmail.com,269.1,8.1,261.0,ch_3SUrYUJoK2H5viIh19nxi8TY
+2025-11-18,Stripe,jeff ronk,homeroaster@gmail.com,72.0,2.39,69.61,ch_3SUrYLJoK2H5viIh0RxPzTep
+2025-11-18,Stripe,Alvey  Anderson,aanderson1966@gmail.com,270.0,8.13,261.87,ch_3SUrYFJoK2H5viIh1dKCBsxQ
+2025-11-18,Stripe,Matthew Perry,outandbackleather@gmail.com,684.0,20.14,663.86,ch_3SUrXcJoK2H5viIh1DsglZBu
+2025-11-18,Stripe,Julian Root,seventeen.tons@gmail.com,270.0,8.13,261.87,ch_3SUrXcJoK2H5viIh1H2S5C8m
+2025-11-18,Stripe,Andrew Antonio,antoniosarah@msn.com,135.0,4.22,130.78,ch_3SUrXZJoK2H5viIh1VwzgQG7
+2025-11-18,Stripe,Jon gman,Anathema416@gmail.com,207.0,6.3,200.7,ch_3SUrXCJoK2H5viIh0NCg3vvO
+2025-11-18,Stripe,Jennifer Ivey,jenniferivey@icloud.com,630.0,18.57,611.43,ch_3SUrX9JoK2H5viIh10zie3vI
+2025-11-18,Stripe,Steven Hylden,larshylden@gmail.com,135.0,4.22,130.78,ch_3SUrX5JoK2H5viIh017mf2ZC
+2025-11-18,Stripe,Mark Blomster ,,324.0,9.7,314.3,ch_3SUrX3JoK2H5viIh0RBX7VmW
+2025-11-18,Stripe,Leah Feliciano,lmfeliciano@gmail.com,324.0,9.7,314.3,ch_3SUrX1JoK2H5viIh0CYTRGJ4
+2025-11-18,Stripe,Chad Rigal,rigalleatherworks@gmail.com,135.0,4.22,130.78,ch_3SUrWeJoK2H5viIh1V3wHjMK
+2025-11-18,Stripe,Alvey  Anderson,aanderson1966@gmail.com,540.0,15.96,524.04,ch_3SUrW4JoK2H5viIh0Ll8Fz5Y
+2025-11-18,Stripe,Aaron L McCarter,aaron@maryvillevineyard.com,72.0,2.39,69.61,ch_3SUrVvJoK2H5viIh0Bj4PObq
+2025-11-18,Stripe,Michael Trombetta,m.trombet@yahoo.com,140.0,4.36,135.64,ch_3SUrVpJoK2H5viIh0OdoeSPh
+2025-11-18,Stripe,Chase Lilly,chase.lilly@gmail.com,147.5,4.58,142.92,ch_3SUrUiJoK2H5viIh1KJ8utxU
+2025-11-18,Stripe,Keith Stone,keith.stone@gmail.com,148.84,4.62,144.22,ch_3SUrUiJoK2H5viIh1ACIS8aJ
+2025-11-18,Stripe,Greg Smith,g.smith@worldventure.com,145.0,4.51,140.49,ch_3SUrUiJoK2H5viIh09biLaQD
+2025-11-18,Stripe,Steven Hylden,larshylden@gmail.com,36.0,1.34,34.66,ch_3SUrTmJoK2H5viIh12EaDFx2
+2025-11-18,Stripe,Corey Cantwell,corey.cantwell@gmail.com,477.0,14.13,462.87,ch_3SUrTcJoK2H5viIh12i9pewy
+2025-11-18,Stripe,Earl G Peacock,egpjr@earthlink.net,379.0,11.29,367.71,ch_3SUrTRJoK2H5viIh1REmyuQO
+2025-11-18,Stripe,Nick Stewart,njstwart@gmail.com,270.0,8.13,261.87,ch_3SUrT4JoK2H5viIh0egES47y
+2025-11-18,Stripe,John Kelley,kelleycustomleather@gmail.com,148.84,4.62,144.22,ch_3SUrSLJoK2H5viIh1FCH1qXW
+2025-11-18,Stripe,Daniel Plunkett,medbow@yahoo.com,270.0,8.13,261.87,ch_3SUrSLJoK2H5viIh0FUKgCVB
+2025-11-18,Stripe,Roy Hamblen,heyrah@hotmail.com,72.0,2.39,69.61,ch_3SUrSLJoK2H5viIh052d0JhQ
+2025-11-18,Stripe,Derek Johnson,dfjsej@gmail.com,117.0,3.69,113.31,ch_3SUrRvJoK2H5viIh18fROiNN
+2025-11-18,Stripe,Matthew Gallagher,mgallagher4@me.com,171.0,5.26,165.74,ch_3SUrRfJoK2H5viIh1plNPtVI
+2025-11-18,Stripe,Gary  Quedenfeld,garyquedenfeld@sbcglobal.net,297.68,8.93,288.75,ch_3SUrRYJoK2H5viIh0LHCsAaK
+2025-11-18,Stripe,Anthony Ricci,glowuplace@gmail.com,270.0,8.13,261.87,ch_3SUrR0JoK2H5viIh1S7cvPku
+2025-11-18,Stripe,Otto Mendez,ovems21@yahoo.com,135.0,4.22,130.78,ch_3SUrQsJoK2H5viIh04D2hKuN
+2025-11-18,Stripe,Andrew Roberts,andrewroberts40@gmail.com,288.0,8.65,279.35,ch_3SUrQhJoK2H5viIh1ZxU9sYl
+2025-11-18,Stripe,Jason Rollins,jkrollins1@gmail.com,135.0,4.22,130.78,ch_3SUrQOJoK2H5viIh0DNp9Sb4
+2025-11-18,Stripe,Patrick Heck,pheck1000@gmail.com,288.0,8.65,279.35,ch_3SUrQAJoK2H5viIh1obv4wID
+2025-11-18,Stripe,Aaron L McCarter,aaron@maryvillevineyard.com,135.0,4.22,130.78,ch_3SUrQ2JoK2H5viIh0WVkOtjI
+2025-11-18,Stripe,Ben Miller,ben@ruleno8.com,135.0,4.22,130.78,ch_3SUrPgJoK2H5viIh1pEM1GId
+2025-11-18,Stripe,Alexandra Fisher,gruffer.roadway3q@icloud.com,171.0,5.26,165.74,ch_3SUrPDJoK2H5viIh0sVV1oJU
+2025-11-18,Stripe,West-Stallion,wstallion22@gmail.com,9.95,0.59,9.36,ch_3SUq77JoK2H5viIh0kk3h8Jd
+2025-11-18,Stripe,Dee Zhen,n1026@msn.com,193.49,5.91,187.58,ch_3SUiWpJoK2H5viIh12NWbngA
+2025-11-18,Stripe,Ben Rawcliffe,benrawcliffe@gmail.com,50.0,1.75,48.25,ch_3SUiDYJoK2H5viIh10E2SZg5
