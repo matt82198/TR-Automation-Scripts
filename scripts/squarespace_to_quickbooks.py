@@ -49,7 +49,7 @@ def parse_arguments():
                         default='examples/customers_backup.csv',
                         help='CSV file with existing QuickBooks customers (exported from QB)')
     parser.add_argument('--product-mapping', type=str,
-                        default='sku_mapping.csv',
+                        default='config/sku_mapping.csv',
                         help='CSV file with Squarespace product to QuickBooks item mapping')
     parser.add_argument('--holiday-mapping', type=str,
                         default='examples/holiday_sale_mappings.csv',
@@ -749,7 +749,7 @@ def extract_pieces_from_customizations(item: Dict[str, Any]) -> int:
     return item.get('quantity', 1)
 
 
-def log_imported_order(order_number: str, iif_filename: str, log_file: str = 'import_log.csv') -> None:
+def log_imported_order(order_number: str, iif_filename: str, log_file: str = 'config/import_log.csv') -> None:
     """
     Log an imported order to prevent duplicate imports
 
@@ -770,7 +770,7 @@ def log_imported_order(order_number: str, iif_filename: str, log_file: str = 'im
         writer.writerow([order_number, import_date, iif_filename])
 
 
-def check_already_imported(order_numbers: List[str], log_file: str = 'import_log.csv') -> Tuple[List[str], List[str]]:
+def check_already_imported(order_numbers: List[str], log_file: str = 'config/import_log.csv') -> Tuple[List[str], List[str]]:
     """
     Check which orders have already been imported
 
@@ -1204,7 +1204,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
             unmapped_report.write("These products were included in the IIF file using their Squarespace names.\n")
             unmapped_report.write("QuickBooks will CREATE NEW ITEMS for these products.\n\n")
             unmapped_report.write("⚠️  RECOMMENDED ACTION:\n")
-            unmapped_report.write("   1. Add these mappings to sku_mapping.csv\n")
+            unmapped_report.write("   1. Add these mappings to config/sku_mapping.csv\n")
             unmapped_report.write("   2. Re-run the import to use your QuickBooks item names\n\n")
             unmapped_report.write("-" * 70 + "\n\n")
             unmapped_report.write("UNMAPPED PRODUCTS:\n\n")
@@ -1214,7 +1214,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 if product['variant']:
                     unmapped_report.write(f"   Variant: {product['variant']}\n")
                 unmapped_report.write(f"   ⚠️  Will create QB item: \"{product['suggested_key'][:31]}\"\n\n")
-                unmapped_report.write(f"   To map this product, add to sku_mapping.csv:\n")
+                unmapped_report.write(f"   To map this product, add to config/sku_mapping.csv:\n")
                 unmapped_report.write(f"   {product['suggested_key']},YourQuickBooksItemName\n\n")
                 unmapped_report.write("-" * 70 + "\n\n")
 
@@ -1223,7 +1223,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         print(f"{'='*60}")
         print(f"UNMAPPED PRODUCTS REPORT: {unmapped_filename}")
         print(f"\nThese products will create NEW ITEMS in QuickBooks.")
-        print(f"Review the report and add mappings to sku_mapping.csv if needed.")
+        print(f"Review the report and add mappings to config/sku_mapping.csv if needed.")
 
     print(f"\n{'='*60}")
     print(f"SUCCESS! Created IIF files:")
@@ -1291,7 +1291,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
     if sku_mapper and sku_mapper.unmapped_products:
         print(f"\n  WARNING - REVIEW UNMAPPED PRODUCTS FIRST:")
         print(f"      {unmapped_filename}")
-        print(f"      Add mappings to sku_mapping.csv and re-run if needed")
+        print(f"      Add mappings to config/sku_mapping.csv and re-run if needed")
 
 
 def create_encrypted_zip(files: List[str], zip_filename: str, password: str) -> str:
@@ -1324,7 +1324,7 @@ def create_encrypted_zip(files: List[str], zip_filename: str, password: str) -> 
     return zip_filename
 
 
-def get_gmail_oauth_token(token_file: str = 'gmail_token.json') -> str:
+def get_gmail_oauth_token(token_file: str = 'config/gmail_token.json') -> str:
     """
     Get OAuth2 access token for Gmail using Google Sign-In.
     Handles initial authentication and token refresh.
@@ -1361,17 +1361,17 @@ def get_gmail_oauth_token(token_file: str = 'gmail_token.json') -> str:
             creds.refresh(Request())
         else:
             # Need OAuth2 credentials file
-            creds_file = 'gmail_credentials.json'
+            creds_file = 'config/gmail_credentials.json'
             if not os.path.exists(creds_file):
-                print("\nERROR: gmail_credentials.json not found!")
+                print("\nERROR: config/gmail_credentials.json not found!")
                 print("\nTo set up Gmail OAuth2:")
                 print("1. Go to: https://console.cloud.google.com/")
                 print("2. Create a new project (or select existing)")
                 print("3. Enable Gmail API")
                 print("4. Create OAuth 2.0 Client ID (Desktop app)")
-                print("5. Download credentials as 'gmail_credentials.json'")
-                print("6. Place file in this directory")
-                raise FileNotFoundError("gmail_credentials.json not found")
+                print("5. Download credentials as 'config/gmail_credentials.json'")
+                print("6. Place file in the config/ directory")
+                raise FileNotFoundError("config/gmail_credentials.json not found")
 
             print("\nOpening browser for Google Sign-In...")
             print("Please authorize the application to send emails on your behalf.")
@@ -1469,7 +1469,7 @@ def main():
     else:
         print(f"NOTE: No product mapping file found: {args.product_mapping}")
         print("      Items will use Squarespace product names as-is")
-        print("      Create sku_mapping.csv to map Squarespace products to QuickBooks items")
+        print("      Create config/sku_mapping.csv to map Squarespace products to QuickBooks items")
 
     # Load holiday sale mappings if provided (takes priority over regular mappings)
     if args.holiday_mapping:
@@ -1515,7 +1515,7 @@ def main():
         if already_imported:
             print(f"\nWARNING: {len(already_imported)} order(s) already imported:")
             for num in already_imported:
-                print(f"  - Order #{num} - SKIPPING (already in import_log.csv)")
+                print(f"  - Order #{num} - SKIPPING (already in config/import_log.csv)")
             print()
 
         if new_orders:
@@ -1530,7 +1530,7 @@ def main():
 
             print(f"\nFetched {len(orders)} of {len(new_orders)} requested orders")
         else:
-            print("\nAll requested orders have already been imported. Check import_log.csv")
+            print("\nAll requested orders have already been imported. Check config/import_log.csv")
 
     else:
         # BATCH MODE - fetch by date range
