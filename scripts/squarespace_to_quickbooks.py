@@ -46,11 +46,14 @@ def parse_arguments():
                         default=None,
                         help='Output IIF filename')
     parser.add_argument('--customers', type=str,
-                        default=None,
+                        default='examples/customers_backup.csv',
                         help='CSV file with existing QuickBooks customers (exported from QB)')
     parser.add_argument('--product-mapping', type=str,
                         default='sku_mapping.csv',
                         help='CSV file with Squarespace product to QuickBooks item mapping')
+    parser.add_argument('--holiday-mapping', type=str,
+                        default='examples/holiday_sale_mappings.csv',
+                        help='CSV file with holiday sale product mappings (takes priority over regular mappings)')
     parser.add_argument('--ar-account', type=str,
                         default='Accounts Receivable',
                         help='A/R account name in QuickBooks')
@@ -350,6 +353,7 @@ class ProductMapper:
     def __init__(self):
         self.product_map = {}  # product_name -> qb_item (simple mappings)
         self.variant_map = {}  # "product - variant" -> qb_item (variant-specific mappings)
+        self.holiday_map = {}  # product_name -> qb_holiday_item (holiday sale mappings - checked first)
         self.unmapped_products = []  # Track products that couldn't be mapped (for reporting)
 
     def load_product_mapping(self, csv_file: str) -> None:
@@ -395,6 +399,41 @@ class ProductMapper:
         except Exception as e:
             print(f"Warning: Could not load product mapping: {e}")
 
+    def load_holiday_mapping(self, csv_file: str) -> None:
+        """
+        Load holiday sale product mapping from CSV file
+        Expected columns: squarespace_product, qb_holiday_item
+        Holiday mappings take priority over regular mappings
+        """
+        if not csv_file:
+            return
+
+        if not os.path.exists(csv_file):
+            print(f"Warning: Holiday mapping file not found: {csv_file}")
+            return
+
+        print(f"Loading holiday sale mappings from: {csv_file}")
+
+        try:
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+
+                for row in reader:
+                    sq_product = row.get('squarespace_product', '').strip()
+                    qb_item = row.get('qb_holiday_item', '').strip()
+
+                    if sq_product and qb_item:
+                        # Store as simple product mapping (holiday mappings are product-level only)
+                        self.holiday_map[sq_product.lower()] = {
+                            'qb_item': qb_item,
+                            'original_name': sq_product
+                        }
+
+            print(f"  Loaded {len(self.holiday_map)} holiday sale mappings")
+
+        except Exception as e:
+            print(f"Warning: Could not load holiday mapping: {e}")
+
     def _normalize_variant(self, variant) -> str:
         """
         Normalize variant string for matching
@@ -418,6 +457,7 @@ class ProductMapper:
         Get QuickBooks item name for a Squarespace product with smart variant matching
 
         Matching priority:
+        0. Holiday sale mapping (if loaded - checked first)
         1. Exact match on "ProductName - Variant" (full variant string)
         2. Exact match on product name only
         3. Partial match on variant attributes
@@ -431,6 +471,10 @@ class ProductMapper:
             QuickBooks item name (always returns a value, but tracks unmapped products)
         """
         lookup_key = product_name.strip().lower()
+
+        # PRIORITY 0: Check holiday sale mappings first (takes precedence over all other mappings)
+        if lookup_key in self.holiday_map:
+            return self.holiday_map[lookup_key]['qb_item']
 
         # PRIORITY 1: Try exact match with full variant string
         if variant:
@@ -695,9 +739,9 @@ def extract_pieces_from_customizations(item: Dict[str, Any]) -> int:
         variant_options = ' '.join(str(v) for v in variant_options if v)
     variant_options = str(variant_options)
     if variant_options:
-        # Look for patterns like "12 pieces", "24 pcs", etc.
+        # Look for patterns like "12 pieces", "24 pcs", "10 sides", etc.
         import re
-        match = re.search(r'(\d+)\s*(?:piece|pcs|pc)', variant_options.lower())
+        match = re.search(r'(\d+)\s*(?:piece|pcs|pc|side)', variant_options.lower())
         if match:
             return int(match.group(1))
 
@@ -800,6 +844,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
         # Get customer details for matching
         billing = order.get('billingAddress', {})
+
         first_name = billing.get('firstName', '').strip()
         last_name = billing.get('lastName', '').strip()
         email = order.get('customerEmail', '').strip()
@@ -827,34 +872,62 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             # Store customer details for CUST record (only for new customers)
             if customer_name not in customer_records:
-                # Build address as single field with newline separators
-                addr_lines = []
-                if billing.get('address1'):
-                    addr_lines.append(billing.get('address1'))
-                if billing.get('address2'):
-                    addr_lines.append(billing.get('address2'))
-                city = billing.get('city', '')
-                state = billing.get('state', '')
-                zip_code = billing.get('postalCode', '')
-                city_state_zip = f"{city} {state} {zip_code}".strip()
-                if city_state_zip:
-                    addr_lines.append(city_state_zip)
-                if billing.get('countryCode'):
-                    addr_lines.append(billing.get('countryCode'))
+                # Build address per QuickBooks format: BADDR1=street, BADDR2="City, State ZIP"
+                addr1 = (billing.get('address1', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
+                address2_raw = (billing.get('address2', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
 
-                full_address = '\n'.join(addr_lines)
+                city = (billing.get('city', '') or '').replace('\n', ' ').replace('\r', ' ')
+                state = (billing.get('state', '') or '').replace('\n', ' ').replace('\r', ' ')
+                zip_code = (billing.get('postalCode', '') or '').replace('\n', ' ').replace('\r', ' ')
+
+                # QuickBooks format: "City, State ZIP" in quotes
+                city_state_zip = f"{city}, {state} {zip_code}".strip()
+
+                # For customers without company: BADDR1=name, BADDR2=street, BADDR3="City, State ZIP"
+                # Customer name needs to be on first line of bill-to address
+                # We'll set this after we have customer_name
+                addr2 = addr1  # Street address moves to BADDR2
+                addr1 = ''  # Will be set to customer name below
+                addr3 = city_state_zip
+                addr4 = address2_raw if address2_raw else ''  # Apt/Suite if exists
+                addr5 = ''
 
                 # Determine tax code: Georgia state tax if in-state, Non if out-of-state
                 is_in_state = is_in_state_order(order, SHIP_FROM_STATE)
-                tax_code = 'Tax' if is_in_state else 'Non'  # Adjust 'Tax' to your QB tax code name
+                tax_code = 'Tax' if is_in_state else 'Non'
+
+                # Get shipping address for SADDR fields
+                shipping = order.get('shippingAddress') or {}
+                ship_addr1 = (shipping.get('address1', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
+                ship_address2_raw = (shipping.get('address2', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
+
+                ship_city = (shipping.get('city', '') or '').replace('\n', ' ').replace('\r', ' ')
+                ship_state = (shipping.get('state', '') or '').replace('\n', ' ').replace('\r', ' ')
+                ship_zip = (shipping.get('postalCode', '') or '').replace('\n', ' ').replace('\r', ' ')
+                ship_city_state_zip = f"{ship_city}, {ship_state} {ship_zip}".strip()
+
+                # Ship to address for customer record - name on first line
+                saddr1 = customer_name[:40]  # Customer name on first line
+                saddr2 = ship_addr1  # Street address
+                saddr3 = ship_city_state_zip  # City, State ZIP
+                saddr4 = ship_address2_raw if ship_address2_raw else ''  # Apt/Suite if exists
+                saddr5 = ''
 
                 customer_records[customer_name] = {
                     'name': customer_name,
-                    'addr1': full_address,
-                    'addr2': '',
-                    'addr3': '',
-                    'addr4': '',
-                    'addr5': '',
+                    'first_name': first_name[:15] if first_name else '',
+                    'last_name': last_name[:15] if last_name else '',
+                    'company_name': '',  # No company name for individual customers
+                    'addr1': customer_name[:40],  # Customer name on first line
+                    'addr2': addr2,
+                    'addr3': addr3,
+                    'addr4': addr4,
+                    'addr5': addr5,
+                    'saddr1': saddr1,
+                    'saddr2': saddr2,
+                    'saddr3': saddr3,
+                    'saddr4': saddr4,
+                    'saddr5': saddr5,
                     'email': email[:80] if email else '',
                     'phone': phone[:21] if phone else '',
                     'taxable': 'Y' if is_in_state else 'N',
@@ -866,22 +939,25 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
     if customer_records:
         print(f"  Creating customer file: {customer_filename}")
         with open(customer_filename, 'w', encoding='utf-8') as f:
-            # Customer records with tax codes
-            f.write("!CUST\tNAME\tBDADDR1\tBDADDR2\tBDADDR3\tBDADDR4\tBDADDR5\tEMAIL\tPHONE1\tTAXABLE\tSALESTAXCODE\n")
+            # Customer records matching QuickBooks export format with SADDR fields
+            f.write("!CUST\tNAME\tBADDR1\tBADDR2\tBADDR3\tBADDR4\tBADDR5\tSADDR1\tSADDR2\tSADDR3\tSADDR4\tSADDR5\tPHONE1\tEMAIL\tTAXABLE\tSALESTAXCODE\tCOMPANYNAME\tFIRSTNAME\tLASTNAME\n")
             for cust_name, cust_info in sorted(customer_records.items()):
-                f.write(f"CUST\t{cust_info['name']}\t{cust_info['addr1']}\t{cust_info['addr2']}\t"
-                       f"{cust_info['addr3']}\t{cust_info['addr4']}\t{cust_info['addr5']}\t"
-                       f"{cust_info['email']}\t{cust_info['phone']}\t{cust_info['taxable']}\t{cust_info['tax_code']}\n")
+                f.write(f"CUST\t{cust_info['name']}\t"
+                       f"{cust_info['addr1']}\t{cust_info['addr2']}\t\"{cust_info['addr3']}\"\t{cust_info['addr4']}\t{cust_info['addr5']}\t"
+                       f"{cust_info['saddr1']}\t{cust_info['saddr2']}\t\"{cust_info['saddr3']}\"\t{cust_info['saddr4']}\t{cust_info['saddr5']}\t"
+                       f"{cust_info['phone']}\t{cust_info['email']}\t"
+                       f"{cust_info['taxable']}\t{cust_info['tax_code']}\t"
+                       f"{cust_info['company_name']}\t{cust_info['first_name']}\t{cust_info['last_name']}\n")
 
     # FILE 2: INVOICES ONLY
     invoice_filename = filename.replace('.iif', '_INVOICES.iif')
     print(f"  Creating invoice file: {invoice_filename}")
 
     with open(invoice_filename, 'w', encoding='utf-8') as f:
-        # Invoice headers with Bill To (ADDR) and Ship To address fields and DOCNUM
-        f.write("!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tSHIPDATE\tSHIPVIA\tREP\tADDR1\tADDR2\tADDR3\tADDR4\tADDR5\tSHIPTOADDR1\tSHIPTOADDR2\tSHIPTOADDR3\tSHIPTOADDR4\tSHIPTOADDR5\n")
-        # Line items - removed TAXABLE since customer tax code handles it
-        f.write("!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tQNTY\tPRICE\tINVITEM\tOTHER1\tINVITEMDESC\n")
+        # Invoice headers without address fields - addresses come from customer record
+        f.write("!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tSHIPDATE\tSHIPVIA\tREP\n")
+        # Line items - minimal fields only (INVITEMDESC, OTHER1, TAXABLE not supported)
+        f.write("!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tQNTY\tPRICE\tINVITEM\n")
         f.write("!ENDTRNS\n")
 
         # Create invoices
@@ -920,42 +996,58 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                     customer_name = email.split('@')[0] if email else 'Guest Customer'
                 customer_name = sanitize_customer_name(customer_name)
 
-            # Get Bill To address (from billing address)
-            # QuickBooks stores full address in ADDR1 with newline separators
-            bill_lines = []
-            if billing.get('address1'):
-                bill_lines.append(billing.get('address1'))
-            if billing.get('address2'):
-                bill_lines.append(billing.get('address2'))
-            bill_city = billing.get('city') or ''
-            bill_state = billing.get('state', '')
-            bill_zip = billing.get('postalCode', '')
-            city_state_zip = f"{bill_city} {bill_state} {bill_zip}".strip()
-            if city_state_zip:
-                bill_lines.append(city_state_zip)
-            if billing.get('countryCode'):
-                bill_lines.append(billing.get('countryCode'))
-            bill_addr1 = '\n'.join(bill_lines)
-            bill_addr2 = bill_addr3 = bill_addr4 = bill_addr5 = ''
+            # Get Bill To address (from billing address) - clean format with name on first line
+            bill_street1 = (billing.get('address1', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
+            bill_address2_raw = (billing.get('address2', '') or '').replace('\n', ' ').replace('\r', ' ')
 
-            # Get Ship To address
-            # QuickBooks stores full address in SHIPTOADDR1 with newline separators
+            bill_city = (billing.get('city', '') or '').replace('\n', ' ').replace('\r', ' ')
+            bill_state = (billing.get('state', '') or '').replace('\n', ' ').replace('\r', ' ')
+            bill_zip = (billing.get('postalCode', '') or '').replace('\n', ' ').replace('\r', ' ')
+            bill_city_state_zip = f"{bill_city}, {bill_state} {bill_zip}".strip()[:40]
+
+            bill_country_code = billing.get('countryCode', '').strip().upper()
+
+            # Build bill-to address with customer name on first line
+            bill_addr1 = customer_name[:40]  # Customer name on first line
+            if bill_address2_raw:
+                # Has apt/suite: Name, Street, Apt, City/State/ZIP
+                bill_addr2 = bill_street1
+                bill_addr3 = bill_address2_raw[:40]
+                bill_addr4 = bill_city_state_zip
+                bill_addr5 = '' if bill_country_code == 'US' else bill_country_code
+            else:
+                # No apt: Name, Street, City/State/ZIP
+                bill_addr2 = bill_street1
+                bill_addr3 = bill_city_state_zip
+                bill_addr4 = '' if bill_country_code == 'US' else bill_country_code
+                bill_addr5 = ''
+
+            # Get Ship To address - clean format with name on first line
             shipping = order.get('shippingAddress') or {}
-            ship_lines = []
-            if shipping.get('address1'):
-                ship_lines.append(shipping.get('address1'))
-            if shipping.get('address2'):
-                ship_lines.append(shipping.get('address2'))
-            ship_city = shipping.get('city') or ''
-            ship_state = shipping.get('state', '')
-            ship_zip = shipping.get('postalCode', '')
-            city_state_zip = f"{ship_city} {ship_state} {ship_zip}".strip()
-            if city_state_zip:
-                ship_lines.append(city_state_zip)
-            if shipping.get('countryCode'):
-                ship_lines.append(shipping.get('countryCode'))
-            ship_addr1 = '\n'.join(ship_lines)
-            ship_addr2 = ship_addr3 = ship_addr4 = ship_addr5 = ''
+            ship_street1 = (shipping.get('address1', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
+            ship_address2_raw = (shipping.get('address2', '') or '').replace('\n', ' ').replace('\r', ' ')
+
+            ship_city = (shipping.get('city', '') or '').replace('\n', ' ').replace('\r', ' ')
+            ship_state = (shipping.get('state', '') or '').replace('\n', ' ').replace('\r', ' ')
+            ship_zip = (shipping.get('postalCode', '') or '').replace('\n', ' ').replace('\r', ' ')
+            ship_city_state_zip = f"{ship_city}, {ship_state} {ship_zip}".strip()[:40]
+
+            ship_country_code = shipping.get('countryCode', '').strip().upper()
+
+            # Build ship-to address with customer name on first line
+            ship_addr1 = customer_name[:40]  # Customer name on first line
+            if ship_address2_raw:
+                # Has apt/suite: Name, Street, Apt, City/State/ZIP
+                ship_addr2 = ship_street1
+                ship_addr3 = ship_address2_raw[:40]
+                ship_addr4 = ship_city_state_zip
+                ship_addr5 = '' if ship_country_code == 'US' else ship_country_code
+            else:
+                # No apt: Name, Street, City/State/ZIP
+                ship_addr2 = ship_street1
+                ship_addr3 = ship_city_state_zip
+                ship_addr4 = '' if ship_country_code == 'US' else ship_country_code
+                ship_addr5 = ''
 
             # Line items
             line_items = order.get('lineItems', [])
@@ -969,11 +1061,10 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
             # Determine invoice number: use SS order number with prefix if flag is set, otherwise blank
             invoice_number = f"SS-{order_number}" if use_ss_invoice_numbers else ''
 
-            # TRNS line - Invoice header with Bill To and Ship To addresses and invoice number
+            # TRNS line - Invoice header without addresses (addresses come from customer record)
+            # REP field left blank - QuickBooks requires Name:EntityType:Initials format if used
             f.write(f"TRNS\t\tINVOICE\t{invoice_date}\t{ar_account}\t{customer_name}\t{invoice_total}\t{invoice_number}\t"
-                   f"{ship_date}\tUPS\tSHOP\t"
-                   f"{bill_addr1}\t{bill_addr2}\t{bill_addr3}\t{bill_addr4}\t{bill_addr5}\t"  # Bill To (ADDR1-5)
-                   f"{ship_addr1}\t{ship_addr2}\t{ship_addr3}\t{ship_addr4}\t{ship_addr5}\n")  # Ship To (SHIPTOADDR1-5)
+                   f"{ship_date}\tUPS\t\n")
 
             # SPL lines - Line items with product mapping, quantity, pieces, price, description
             # Tax is handled by customer tax code, not per-item
@@ -1013,8 +1104,8 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 unit_price = float(unit_price) if unit_price else 0.0
                 line_total = -(quantity * unit_price)  # Negative for QB convention
 
-                # Write line item - no TAXABLE field (customer tax code handles it)
-                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{line_total}\t{quantity}\t{unit_price}\t{qb_item}\t{pieces}\t{description}\n")
+                # Write line item - minimal fields only (no INVITEMDESC, OTHER1, or TAXABLE)
+                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{line_total}\t{quantity}\t{unit_price}\t{qb_item}\n")
 
             # Discount line items - capture discount codes and gift cards as "Non-inventory Item"
             discounts = order.get('discountTotal', {}).get('value', 0)
@@ -1044,18 +1135,18 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                     discount_desc = "Discount applied"
 
                 # Write discount as "Non-inventory Item" (positive discount = negative amount)
-                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{discounts}\t1\t{-discounts}\tNon-inventory Item\t1\t{discount_desc}\n")
+                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{discounts}\t1\t{-discounts}\tNon-inventory Item\n")
 
             # Freight line item - ALWAYS included, even if $0
             shipping_total = order.get('shippingTotal', {}).get('value', 0)
             shipping_total = float(shipping_total) if shipping_total else 0.0
-            f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{-shipping_total}\t1\t{shipping_total}\tFreight\t1\tShipping and handling\n")
+            f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{-shipping_total}\t1\t{shipping_total}\tFreight\n")
 
             # Tax as separate line item
             tax = order.get('taxTotal', {}).get('value', 0)
             tax = float(tax) if tax else 0.0
             if tax > 0:
-                f.write(f"SPL\t\tINVOICE\t{invoice_date}\tSales Tax Payable\t{customer_name}\t{-tax}\t1\t{tax}\tSales Tax\t0\tSales Tax\n")
+                f.write(f"SPL\t\tINVOICE\t{invoice_date}\tSales Tax Payable\t{customer_name}\t{-tax}\t1\t{tax}\tSales Tax\n")
 
             # End this invoice transaction
             f.write("ENDTRNS\n")
@@ -1328,7 +1419,6 @@ def send_email_with_attachment_oauth(recipient: str, subject: str, body: str, at
 
     # Send email using OAuth2
     import base64
-    from email.mime.text import MIMEText
 
     # Encode message
     raw_message = base64.urlsafe_b64encode(msg.as_bytes()).decode('utf-8')
@@ -1376,12 +1466,16 @@ def main():
     sku_mapper = ProductMapper()
     if args.product_mapping and os.path.exists(args.product_mapping):
         sku_mapper.load_product_mapping(args.product_mapping)
-        print()
     else:
         print(f"NOTE: No product mapping file found: {args.product_mapping}")
         print("      Items will use Squarespace product names as-is")
         print("      Create sku_mapping.csv to map Squarespace products to QuickBooks items")
-        print()
+
+    # Load holiday sale mappings if provided (takes priority over regular mappings)
+    if args.holiday_mapping:
+        sku_mapper.load_holiday_mapping(args.holiday_mapping)
+
+    print()
 
     # Determine import mode: specific orders, fulfilled today, or date range
     orders = []
@@ -1477,10 +1571,11 @@ def main():
 
     # Email if requested
     if args.email:
-        # Get sender email from environment or prompt
-        sender_email = EMAIL_USER or input("Enter your Gmail address: ").strip()
+        # Get sender email from environment, or use recipient email for OAuth
+        sender_email = EMAIL_USER or EMAIL_RECIPIENT or args.email
         if not sender_email:
             print("\nERROR: Sender email address required")
+            print("Set EMAIL_USER environment variable")
             return
 
         recipient = args.email
