@@ -33,6 +33,14 @@ config/import_log.csv
 *_UNMAPPED_PRODUCTS.txt
 *_ENCRYPTED.zip
 
+# Generated output files
+output/
+swatch_book_pages_*/
+swatch_book_reference_*.txt
+swatch_book_complete.txt
+eom_billing_*.csv
+QB_*.csv
+
 # Gmail OAuth credentials (NEVER commit these!)
 config/gmail_credentials.json
 config/gmail_token.json
