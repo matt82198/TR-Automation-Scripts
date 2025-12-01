@@ -58,7 +58,7 @@ def parse_arguments():
                         default='Accounts Receivable',
                         help='A/R account name in QuickBooks')
     parser.add_argument('--income-account', type=str,
-                        default='Sales',
+                        default='Merchandise Sales',
                         help='Income account name in QuickBooks')
     parser.add_argument('--email', type=str,
                         default=None,
@@ -524,6 +524,12 @@ class ProductMapper:
         for mapped_name, mapping in self.product_map.items():
             if mapped_name in lookup_key or lookup_key in mapped_name:
                 return mapping['qb_item']
+
+        # PRIORITY 5: Try matching variant alone against product_map (e.g., "Clear" -> "Tokonole Clear 120g")
+        if variant:
+            variant_key = variant.strip().lower()
+            if variant_key in self.product_map:
+                return self.product_map[variant_key]['qb_item']
 
         # NO MAPPING FOUND - Track for reporting and use fallback
         # Track unmapped product for reporting
@@ -1142,11 +1148,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
             shipping_total = float(shipping_total) if shipping_total else 0.0
             f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{-shipping_total}\t1\t{shipping_total}\tFreight\n")
 
-            # Tax as separate line item
-            tax = order.get('taxTotal', {}).get('value', 0)
-            tax = float(tax) if tax else 0.0
-            if tax > 0:
-                f.write(f"SPL\t\tINVOICE\t{invoice_date}\tSales Tax Payable\t{customer_name}\t{-tax}\t1\t{tax}\tSales Tax\n")
+            # QuickBooks will calculate sales tax automatically based on customer tax code - no manual line item needed
 
             # End this invoice transaction
             f.write("ENDTRNS\n")
