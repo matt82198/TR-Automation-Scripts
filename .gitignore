@@ -1,5 +1,8 @@
-# CSV files (but allow sku_mapping.csv)
-examples/**/*.csv
+# Examples folder (reference files only)
+examples/
+
+# Output folder
+output/
 
 # IDE files
 .idea/
@@ -34,7 +37,6 @@ config/import_log.csv
 *_ENCRYPTED.zip
 
 # Generated output files
-output/
 swatch_book_pages_*/
 swatch_book_reference_*.txt
 swatch_book_complete.txt
