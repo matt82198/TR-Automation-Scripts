@@ -541,12 +541,12 @@ class ProductMapper:
 
         return qb_item
 
-    def get_mapping(self, product_name: str, variant: str = '') -> str:
+    def get_mapping(self, product_name: str, variant: str = '', unit_price: float = None) -> str:
         """
         Get QuickBooks item name for a Squarespace product with smart variant matching
 
         Matching priority:
-        0. Holiday sale mapping (if loaded - checked first)
+        0. Holiday sale mapping (if loaded - checked first, but only if price indicates sale)
         1. Exact match on "ProductName - Variant" (full variant string)
         2. Exact match on product name only
         3. Partial match on variant attributes
@@ -555,6 +555,7 @@ class ProductMapper:
         Args:
             product_name: Squarespace product name
             variant: Optional variant (e.g., "Horween Predator - Steel - 5-6 oz")
+            unit_price: Optional unit price to help determine if it's a sale item
 
         Returns:
             QuickBooks item name (always returns a value, but tracks unmapped products)
@@ -562,8 +563,14 @@ class ProductMapper:
         lookup_key = product_name.strip().lower()
 
         # PRIORITY 0: Check holiday sale mappings first (takes precedence over all other mappings)
+        # BUT only if the price indicates it's actually a sale item
         if lookup_key in self.holiday_map:
-            return self.holiday_map[lookup_key]['qb_item']
+            # Sale price thresholds - regular sides are $299, sale sides are $130-$150
+            # If price is provided and is >= $200, this is NOT a sale item - skip holiday mapping
+            if unit_price is not None and unit_price >= 200:
+                pass  # Skip holiday mapping, continue to regular mappings
+            else:
+                return self.holiday_map[lookup_key]['qb_item']
 
         # PRIORITY 1: Try exact match with full variant string
         if variant:
@@ -1188,9 +1195,13 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 variant_raw = item.get('variantOptions', '')
                 variant = parse_variant_options(variant_raw)
 
+                # Get price (needed for sale vs regular item detection)
+                unit_price = item.get('unitPricePaid', {}).get('value', 0)
+                unit_price = float(unit_price) if unit_price else 0.0
+
                 # Map Squarespace product to QuickBooks item
                 if sku_mapper:
-                    qb_item = sku_mapper.get_mapping(product_name, variant)
+                    qb_item = sku_mapper.get_mapping(product_name, variant, unit_price)
                 else:
                     # No mapper - use product name as-is
                     if variant:
@@ -1213,9 +1224,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 if pieces == quantity:  # No pieces field found in API, default to quantity
                     pieces = quantity
 
-                # Get price
-                unit_price = item.get('unitPricePaid', {}).get('value', 0)
-                unit_price = float(unit_price) if unit_price else 0.0
+                # Calculate line total (unit_price already extracted above for mapping)
                 line_total = -(quantity * unit_price)  # Negative for QB convention
 
                 # Write line item - minimal fields only (no INVITEMDESC, OTHER1, or TAXABLE)
