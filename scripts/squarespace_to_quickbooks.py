@@ -452,6 +452,95 @@ class ProductMapper:
         normalized = re.sub(r'(Color|Size|Weight|Tannage|Grade):\s*', '', normalized, flags=re.IGNORECASE)
         return normalized
 
+    def _build_dynamic_qb_item(self, product_name: str, variant: str) -> Optional[str]:
+        """
+        Dynamically build a QB item name for full hide products based on tannage + color + weight.
+        Format: "{Tannage} {Color} {Weight}" e.g., "Derby Black 3.5-4 oz"
+
+        Returns None if product doesn't match full hide pattern.
+        """
+        import re
+
+        # Known tannage types that follow the "{Tannage} {Color} {Weight}" pattern
+        tannage_patterns = {
+            'derby': 'Derby',
+            'dublin': 'Dublin',
+            'essex': 'Essex',
+            'chromexcel': 'Chromexcel',
+            'cavalier': 'Cavalier',
+            'montana': 'Montana',
+            'predator': 'Predator',
+            'latigo': 'Latigo',
+            'krypto': 'Krypto',
+            'aspen': 'Aspen',
+        }
+
+        # Check if product name matches a known tannage
+        product_lower = product_name.lower()
+        detected_tannage = None
+        for key, tannage_name in tannage_patterns.items():
+            if key in product_lower:
+                detected_tannage = tannage_name
+                break
+
+        if not detected_tannage or not variant:
+            return None
+
+        # Skip panels - they have their own mappings
+        if 'panel' in product_lower:
+            return None
+
+        # Parse variant to extract color and weight
+        # Expected format: "Black - 3-4 oz (1.2-1.6 mm)" or "Color: Black - Weight: 3-4 oz"
+        variant_normalized = self._normalize_variant(variant)
+
+        # Extract weight - look for patterns like "3-4 oz", "3.5-4 oz", "5-6 oz"
+        weight_match = re.search(r'(\d+(?:\.\d+)?-\d+(?:\.\d+)?)\s*oz', variant_normalized, re.IGNORECASE)
+        if not weight_match:
+            return None
+
+        weight_raw = weight_match.group(1)
+
+        # Normalize weight to QB format (e.g., "3-4" -> "3.5-4")
+        weight_parts = weight_raw.split('-')
+        if len(weight_parts) == 2:
+            low = weight_parts[0].strip()
+            high = weight_parts[1].strip()
+            # QB often uses "3.5-4 oz" instead of "3-4 oz"
+            # Map common variations
+            weight_mappings = {
+                '3-4': '3.5-4',
+                '4-5': '4-5',
+                '5-6': '5-6',
+                '6-7': '6-7',
+                '7-8': '7-8',
+                '8-9': '8-9',
+                '9-10': '9-10',
+                '3-3.5': '3-3.5',
+                '3.5-4': '3.5-4',
+                '4.5-5': '4.5-5',
+                '5.5-6': '5.5-6',
+            }
+            weight_key = f"{low}-{high}"
+            weight = weight_mappings.get(weight_key, weight_key)
+        else:
+            weight = weight_raw
+
+        # Extract color - everything before the weight pattern
+        color_part = re.sub(r'\d+(?:\.\d+)?-\d+(?:\.\d+)?\s*oz.*', '', variant_normalized, flags=re.IGNORECASE).strip()
+        color_part = color_part.rstrip(' -').strip()
+
+        if not color_part:
+            return None
+
+        # Title case the color
+        color = ' '.join(word.capitalize() for word in color_part.split())
+
+        # Build the QB item name
+        qb_item = f"{detected_tannage} {color} {weight} oz"
+
+        return qb_item
+
     def get_mapping(self, product_name: str, variant: str = '') -> str:
         """
         Get QuickBooks item name for a Squarespace product with smart variant matching
@@ -497,27 +586,40 @@ class ProductMapper:
             return self.product_map[lookup_key]['qb_item']
 
         # PRIORITY 3: Try partial matching on variant mappings
+        # IMPORTANT: Must also match product name to avoid cross-product matches
         if variant:
             variant_normalized = self._normalize_variant(variant).lower()
-            # Look for variant mappings that contain the variant attributes
             best_match = None
             best_match_score = 0
 
             for mapped_variant, mapping in self.variant_map.items():
-                # Extract variant portion (after first " - ")
                 parts = mapped_variant.split(' - ', 1)
                 if len(parts) > 1:
-                    mapped_variant_part = parts[1]
-                    # Count matching words
-                    variant_words = set(variant_normalized.lower().split())
-                    mapped_words = set(mapped_variant_part.lower().split())
-                    matches = len(variant_words & mapped_words)
+                    mapped_product_part = parts[0].lower()
+                    mapped_variant_part = parts[1].lower()
 
-                    if matches > best_match_score:
-                        best_match_score = matches
+                    # Check if product name matches (must have significant overlap)
+                    product_words = set(lookup_key.split())
+                    mapped_product_words = set(mapped_product_part.split())
+                    product_overlap = len(product_words & mapped_product_words)
+
+                    # Skip if product names don't match at all
+                    if product_overlap == 0:
+                        continue
+
+                    # Count matching variant attributes
+                    variant_words = set(variant_normalized.split())
+                    mapped_variant_words = set(mapped_variant_part.split())
+                    variant_matches = len(variant_words & mapped_variant_words)
+
+                    # Score = product overlap + variant matches
+                    score = product_overlap + variant_matches
+
+                    if score > best_match_score:
+                        best_match_score = score
                         best_match = mapping['qb_item']
 
-            if best_match and best_match_score >= 2:  # At least 2 matching attributes
+            if best_match and best_match_score >= 3:  # Need product + variant matches
                 return best_match
 
         # PRIORITY 4: Try partial matching on product name
@@ -530,6 +632,12 @@ class ProductMapper:
             variant_key = variant.strip().lower()
             if variant_key in self.product_map:
                 return self.product_map[variant_key]['qb_item']
+
+        # PRIORITY 6: Try dynamic QB item name builder for full hides
+        # This builds names like "Derby Black 3.5-4 oz" from product + variant
+        dynamic_qb_item = self._build_dynamic_qb_item(product_name, variant)
+        if dynamic_qb_item:
+            return dynamic_qb_item
 
         # NO MAPPING FOUND - Track for reporting and use fallback
         # Track unmapped product for reporting
