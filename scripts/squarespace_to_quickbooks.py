@@ -375,8 +375,15 @@ class ProductMapper:
                 reader = csv.DictReader(f)
 
                 for row in reader:
-                    sq_product = row.get('SquarespaceProductName', '').strip()
-                    qb_item = row.get('QuickBooksItem', '').strip()
+                    sq_product = row.get('SquarespaceProductName') or ''
+                    qb_item = row.get('QuickBooksItem') or ''
+
+                    # Skip empty lines and comment lines
+                    if not sq_product or sq_product.startswith('#'):
+                        continue
+
+                    sq_product = sq_product.strip()
+                    qb_item = qb_item.strip()
 
                     if sq_product and qb_item:
                         # Check if this is a variant-specific mapping (contains " - ")
@@ -437,7 +444,7 @@ class ProductMapper:
     def _normalize_variant(self, variant) -> str:
         """
         Normalize variant string for matching
-        Removes extra spaces, standardizes separators
+        Removes extra spaces, standardizes separators, strips mm measurements
         """
         if not variant:
             return ""
@@ -450,6 +457,9 @@ class ProductMapper:
         # Remove common prefixes like "Color:", "Size:", etc.
         import re
         normalized = re.sub(r'(Color|Size|Weight|Tannage|Grade):\s*', '', normalized, flags=re.IGNORECASE)
+        # Remove mm measurements in parentheses (e.g., "(1.2-1.6 mm)" or "(2.0 – 2.4 mm)")
+        # This ensures "English Tan - 5-6 oz (2.0 – 2.4 mm)" matches "English Tan - 5-6 oz"
+        normalized = re.sub(r'\s*\([^)]*mm[^)]*\)', '', normalized, flags=re.IGNORECASE).strip()
         return normalized
 
     def _build_dynamic_qb_item(self, product_name: str, variant: str) -> Optional[str]:
