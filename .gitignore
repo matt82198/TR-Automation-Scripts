@@ -29,6 +29,8 @@ Thumbs.db
 # Customer data and import tracking (local only, not committed)
 data/customers.csv
 config/import_log.csv
+config/missing_inventory.csv
+config/leather_weight_coefficients.csv
 
 # Generated IIF files
 *.iif
