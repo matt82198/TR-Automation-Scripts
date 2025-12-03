@@ -329,7 +329,7 @@ Saphir • Renovateur,Saphir Renovateur
 Saphir • Cotton Chamois Cloth,Saphir Cloth
 
 # Coronado
-Coronado • Clark Backpack, Horween Black LaSalle,Clark Bag
+"Coronado • Clark Backpack, Horween Black LaSalle",Clark Bag
 
 # Tempesti
 Tempesti • Elbamatt Liscio Lux - Cammello - 1.0  - 1.2 mm (2.5-3 oz),Elb. Liscio Lux Cammello 2.5-3
@@ -337,15 +337,5 @@ Tempesti • Elbamatt Liscio - Ambra - 1.0  - 1.2 mm (2.5-3 oz),Elbamatt Liscio 
 Tempesti • Baku - Fieno - 1.0  - 1.2 mm (2.5-3 oz),Baku Fieno 2.5-3 oz (1-1.2 mm)
 Tempesti • Maine Eco Lux - T. Moro - 1.0  - 1.2 mm (2.5-3 oz),Maine Eco Lux T. Moro 2.5-3 oz
 
-# Mystery Bundles (all quantities go to holiday buckets)
-Horween • Horsefront Mystery Bundle - 6 Double Horsefronts,2025 Holiday Horween HF Bundle
-Horween • Horsefront Mystery Bundle - 3 Double Horsefronts,2025 Holiday Horween HF Bundle
-Horween • Horsefront Mystery Bundle - 1 Double Horsefront,2025 Holiday Horween HF Bundle
-Horween • Mystery Bundle 6 oz+ - 10 Sides,2025 Holiday Horween over 6 oz
-Horween • Mystery Bundle 6 oz+ - 6 Sides,2025 Holiday Horween over 6 oz
-Horween • Mystery Bundle 6 oz+ - 3 Sides,2025 Holiday Horween over 6 oz
-Horween • Mystery Bundle 6 oz+ - 1 Side,2025 Holiday Horween over 6 oz
-Horween • Mystery Bundle 3.5-6 oz - 10 Sides,2025 Holiday Horween 6 oz under
-Horween • Mystery Bundle 3.5-6 oz - 6 Sides,2025 Holiday Horween 6 oz under
-Horween • Mystery Bundle 3.5-6 oz - 3 Sides,2025 Holiday Horween 6 oz under
-Horween • Mystery Bundle 3.5-6 oz - 1 Side,2025 Holiday Horween 6 oz under
+# Mystery Bundles - Use --holiday flag to map these to holiday buckets via holiday_sale_mappings.csv
+# Do NOT add direct mappings here as they would always use holiday items even in non-holiday mode

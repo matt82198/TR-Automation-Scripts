@@ -350,11 +350,32 @@ def normalize_for_matching(text: str) -> str:
 class ProductMapper:
     """Maps Squarespace products to QuickBooks items supporting variants (tannage, color, weight)"""
 
+    # Default path for holiday mappings (auto-loaded if exists)
+    DEFAULT_HOLIDAY_MAPPING = 'examples/holiday_sale_mappings.csv'
+
+    # Patterns that indicate a holiday/sale item (case-insensitive)
+    HOLIDAY_ITEM_PATTERNS = [
+        'mystery bundle',
+        'sale ',
+        'holiday',
+    ]
+
     def __init__(self):
         self.product_map = {}  # product_name -> qb_item (simple mappings)
         self.variant_map = {}  # "product - variant" -> qb_item (variant-specific mappings)
         self.holiday_map = {}  # product_name -> qb_holiday_item (holiday sale mappings - checked first)
         self.unmapped_products = []  # Track products that couldn't be mapped (for reporting)
+
+    def _is_holiday_item(self, product_name: str) -> bool:
+        """
+        Detect if a product is a holiday/sale item based on name patterns.
+        These items should use holiday mappings when available.
+        """
+        name_lower = product_name.lower()
+        for pattern in self.HOLIDAY_ITEM_PATTERNS:
+            if pattern in name_lower:
+                return True
+        return False
 
     def load_product_mapping(self, csv_file: str) -> None:
         """
@@ -556,7 +577,7 @@ class ProductMapper:
         Get QuickBooks item name for a Squarespace product with smart variant matching
 
         Matching priority:
-        0. Holiday sale mapping (if loaded - checked first, but only if price indicates sale)
+        0. Holiday sale mapping (ONLY for holiday/sale items like mystery bundles - auto-detected)
         1. Exact match on "ProductName - Variant" (full variant string)
         2. Exact match on product name only
         3. Partial match on variant attributes
@@ -572,11 +593,11 @@ class ProductMapper:
         """
         lookup_key = product_name.strip().lower()
 
-        # PRIORITY 0: Check holiday sale mappings first (takes precedence over all other mappings)
-        # BUT only if the price indicates it's actually a sale item
-        if lookup_key in self.holiday_map:
-            # Sale price thresholds - regular sides are $299, sale sides are $130-$150
-            # If price is provided and is >= $200, this is NOT a sale item - skip holiday mapping
+        # PRIORITY 0: Check holiday sale mappings - ONLY for items that are holiday/sale items
+        # Uses intelligent detection: mystery bundles, items with "SALE" prefix, etc.
+        if lookup_key in self.holiday_map and self._is_holiday_item(product_name):
+            # For holiday items, use holiday mapping
+            # Price check: if price >= $200, it's likely NOT a sale item (regular price)
             if unit_price is not None and unit_price >= 200:
                 pass  # Skip holiday mapping, continue to regular mappings
             else:
@@ -1600,9 +1621,14 @@ def main():
         print("      Items will use Squarespace product names as-is")
         print("      Create config/sku_mapping.csv to map Squarespace products to QuickBooks items")
 
-    # Load holiday sale mappings if provided (takes priority over regular mappings)
-    if args.holiday_mapping:
-        sku_mapper.load_holiday_mapping(args.holiday_mapping)
+    # Load holiday sale mappings - either from explicit flag or auto-detect from default location
+    # Holiday mappings are applied intelligently only to holiday/sale items (mystery bundles, etc.)
+    holiday_mapping_file = args.holiday_mapping
+    if not holiday_mapping_file and os.path.exists(ProductMapper.DEFAULT_HOLIDAY_MAPPING):
+        holiday_mapping_file = ProductMapper.DEFAULT_HOLIDAY_MAPPING
+        print(f"Auto-loading holiday mappings from: {holiday_mapping_file}")
+    if holiday_mapping_file:
+        sku_mapper.load_holiday_mapping(holiday_mapping_file)
 
     print()
 
