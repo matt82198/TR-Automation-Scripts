@@ -358,6 +358,7 @@ class ProductMapper:
         'mystery bundle',
         'sale ',
         'holiday',
+        'margot fog',  # Virgilio Margot Fog holiday sale items
     ]
 
     def __init__(self):
@@ -598,7 +599,9 @@ class ProductMapper:
         if lookup_key in self.holiday_map and self._is_holiday_item(product_name):
             # For holiday items, use holiday mapping
             # Price check: if price >= $200, it's likely NOT a sale item (regular price)
-            if unit_price is not None and unit_price >= 200:
+            # EXCEPTION: Mystery bundles are ALWAYS sale items regardless of price
+            is_mystery_bundle = 'mystery bundle' in lookup_key
+            if unit_price is not None and unit_price >= 200 and not is_mystery_bundle:
                 pass  # Skip holiday mapping, continue to regular mappings
             else:
                 return self.holiday_map[lookup_key]['qb_item']
@@ -622,6 +625,12 @@ class ProductMapper:
         # PRIORITY 2: Try exact match on product name only
         if lookup_key in self.product_map:
             return self.product_map[lookup_key]['qb_item']
+
+        # PRIORITY 2.5: Check if product name itself is in variant_map
+        # This handles cases where Squarespace product names include variant info
+        # (e.g., "Horween • Dearborn - Havana - 3-4 oz" with no separate variant)
+        if lookup_key in self.variant_map:
+            return self.variant_map[lookup_key]['qb_item']
 
         # PRIORITY 3: Try partial matching on variant mappings
         # IMPORTANT: Must also match product name to avoid cross-product matches
