@@ -1,5 +1,8 @@
-# Examples folder (reference files only)
+# Examples folder (reference files only, except essential config files)
 examples/
+!examples/holiday_sale_mappings.csv
+!examples/customers_backup.csv
+!examples/Holiday Product Mappings 2025.txt
 
 # Output folder
 output/
