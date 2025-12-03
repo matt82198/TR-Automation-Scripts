@@ -31,7 +31,7 @@ st.markdown("---")
 # Sidebar navigation
 tool = st.sidebar.radio(
     "Select Tool",
-    ["Payment Fetch", "Order Payment Matcher", "Pending Order Count", "Leather Weight Calculator", "Swatch Book Generator"]
+    ["Payment Fetch", "Order Payment Matcher", "Pending Order Count", "Mystery Bundle Counter", "Leather Weight Calculator", "Swatch Book Generator"]
 )
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
@@ -379,6 +379,102 @@ elif tool == "Pending Order Count":
             st.session_state.missing_inventory = updated_missing
             save_missing_inventory(updated_missing)
             st.toast("Missing inventory updated!")
+
+
+# Mystery Bundle Counter
+elif tool == "Mystery Bundle Counter":
+    st.header("Mystery Bundle Counter")
+    st.markdown("Count mystery bundle quantities needed from pending Squarespace orders for holiday planning.")
+
+    from mystery_bundle_counter import fetch_orders, count_mystery_bundles
+
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.button("Refresh Orders", type="primary", key="mystery_refresh"):
+            st.session_state.pop('mystery_results', None)
+    with col2:
+        status_filter = st.radio("Order Status", ["PENDING", "FULFILLED"], horizontal=True, key="mystery_status")
+
+    # Fetch and count if not cached or status changed
+    cache_key = f'mystery_results_{status_filter}'
+    if cache_key not in st.session_state:
+        api_key = os.environ.get("SQUARESPACE_API_KEY")
+        if not api_key:
+            st.error("SQUARESPACE_API_KEY environment variable not set")
+        else:
+            with st.spinner(f"Fetching {status_filter.lower()} orders..."):
+                try:
+                    orders = fetch_orders(status_filter)
+                    results = count_mystery_bundles(orders)
+                    results['order_count'] = len(orders)
+                    st.session_state[cache_key] = results
+                except Exception as e:
+                    st.error(f"Error fetching orders: {e}")
+
+    if cache_key in st.session_state:
+        results = st.session_state[cache_key]
+
+        st.info(f"Found {results['order_count']} {status_filter.lower()} orders, {results['total_orders_with_bundles']} with mystery bundles")
+
+        # Grand totals
+        st.subheader("Grand Totals")
+        col1, col2, col3 = st.columns(3)
+
+        # Calculate grand totals
+        grand_sides = 0
+        grand_horsefronts = 0
+        grand_shoulders = 0
+
+        for category, data in results["categories"].items():
+            total = data["total"]
+            if "horsefront" in category.lower():
+                grand_horsefronts += total
+            elif "tempesti" in category.lower() or "splenda" in category.lower():
+                grand_shoulders += total
+            else:
+                grand_sides += total
+
+        with col1:
+            st.metric("Sides Needed", grand_sides)
+        with col2:
+            st.metric("Double Horsefronts Needed", grand_horsefronts)
+        with col3:
+            st.metric("Double Shoulders Needed", grand_shoulders)
+
+        st.divider()
+
+        # Category breakdown
+        st.subheader("By Category")
+        if results["categories"]:
+            for category in sorted(results["categories"].keys()):
+                data = results["categories"][category]
+                total = data["total"]
+
+                # Determine unit type
+                if "horsefront" in category.lower():
+                    unit = "Double Horsefronts"
+                elif "tempesti" in category.lower() or "splenda" in category.lower():
+                    unit = "Double Shoulders"
+                else:
+                    unit = "Sides"
+
+                with st.expander(f"{category}: **{total} {unit}** ({len(data['orders'])} orders)"):
+                    for order in data["orders"]:
+                        st.markdown(f"- Order #{order['order_number']} - {order['customer']}: {order['quantity']} ({order['variant']})")
+        else:
+            st.info("No mystery bundles found in orders.")
+
+        st.divider()
+
+        # Order list
+        st.subheader("Orders with Mystery Bundles")
+        if results["order_list"]:
+            for order_info in sorted(results["order_list"], key=lambda x: x["order_number"]):
+                with st.expander(f"Order #{order_info['order_number']} - {order_info['customer']}"):
+                    for bundle in order_info["bundles"]:
+                        st.markdown(f"- {bundle['category']}: {bundle['qty_display']}")
+        else:
+            st.info("No orders with mystery bundles.")
 
 
 # Leather Weight Calculator
