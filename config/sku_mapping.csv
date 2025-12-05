@@ -1,6 +1,7 @@
 SquarespaceProductName,QuickBooksItem
 Horween • Krypto - Vetiver,Krypto Vetiver 3.5-4 oz
 Calf Lining - Ivory,Glovey Ivory Calf Lining
+Calf Lining - Black,Glovey Black Calf Lining
 Highland • Cordovan Shoe Horn - Burgundy,Cordovan Shoe Horn
 Highland • Cordovan Business Card Holder - Burgundy,Non-inventory Item
 Highland • Cordovan Slip Wallet - Black,Non-inventory Item
@@ -31,6 +32,7 @@ Virgilio • Vachetta Box - Alloro - 4-5 oz,Margot Alloro 4.5-5 oz
 Horween • Waxed Flesh Chromexcel® - Black - 5-6 oz,WF Chrxl Black 5-6 oz
 Horween • Washed Chromexcel® - Black Swirl Print with Tipped Effect - 5-6 oz,Beaufort Chrxl Black 5-6 oz
 Horween • Chromexcel® Double Horsefronts - Natural,DHF Chrxl Natural
+Horween • Chromexcel® Double Horsefronts - Black,DHF Chrxl Black
 Horween • Washed Ink Cavalier - 4-5 oz,Washed Cavalier Ink 4-5 oz
 Horween • Aspen Double Horsefronts - Cognac - 4-5 oz,DHF Aspen Cognac
 Horween • Aspen Double Horsefronts - Black - 4-5 oz,DHF Aspen Black
@@ -41,6 +43,11 @@ Virgilio • Vachetta - Natural - 3-4 oz,Vachetta Natural 3-3.5 oz
 Italian Crocco Veg - Dark Brown - 5-6 oz,Crocco Veg Dark Brown 5-5.5 oz
 Virgilio • Margot Fog - Natural - 3-4 oz,Margot Fog Natural 3-3.5 oz
 Horween Chromexcel Single Horsefronts - Black,SHF Chrxl Black
+Saphir • Brush,Saphir Brush
+Horween • Light Natural Derby,2025 Holiday HLC Derby Lt Nat
+Saphir • Nappa Balm,Saphir Nappa Balm
+Conceria Walpier • Tuscany - Single Shoulder (7-8.5 sf) - Black #100 - 5-5.5 oz (2-2.2 mm),Tuscany #100 Black 5-5.5 oz
+Horween • Chromexcel® Double Horsefronts - Color 8,DHF Chrxl Color #8
 
 Horween Chromexcel® Leather Panels - 1' Panel (12"x12") - Black - 3-4 oz (1.2-1.6 mm),Panel Chrxl Black 3.5-4 oz
 Horween Chromexcel® Leather Panels - 1' Panel (12"x12") - Black - 5-6 oz (2-2.4 mm),Panel Chrxl Black 5-6 oz
@@ -322,9 +329,11 @@ Horween Swatch Books - Dublin,Sample Book - Horween Dublin
 Horween Swatch Books - Montana,Sample Book - Horween Montana
 Horween Swatch Books - Latigo,Sample Book - Horween Latigo
 Horween Swatch Books - Illini Latigo,Sample Book - HLC Illini Latigo
+Walpier Swatch Books - Buttero,Sample Book - Walpier Buttero
 
-# Buttero (No Resin variants) - only the one needed for this batch
+# Buttero (No Resin variants)
 Conceria Walpier • Buttero - No Resin - #2 Brown - 5-5.5 oz,Buttero #2 Brown 5-5.5 oz
+Conceria Walpier • Buttero - No Resin - #5 Burgundy - 3-3.5 oz,Buttero #5 Burgundy 3-3.5 oz
 
 # Saphir Products
 Saphir • Renovateur,Saphir Renovateur
@@ -341,6 +350,13 @@ Tempesti • Elbamatt Liscio Lux - Cammello - 1.0  - 1.2 mm (2.5-3 oz),Elb. Lisc
 Tempesti • Elbamatt Liscio - Ambra - 1.0  - 1.2 mm (2.5-3 oz),Elbamatt Liscio Ambra 2.5-3 oz
 Tempesti • Baku - Fieno - 1.0  - 1.2 mm (2.5-3 oz),Baku Fieno 2.5-3 oz (1-1.2 mm)
 Tempesti • Maine Eco Lux - T. Moro - 1.0  - 1.2 mm (2.5-3 oz),Maine Eco Lux T. Moro 2.5-3 oz
+
+# Tulliani Belts - All styles/sizes map to single QB item
+Tulliani Belts,Tulliani Belts
+Tulliani Belts • Carroll Ave,Tulliani Belts
+
+# C.F. Stead Kudu
+C.F. Stead • Kudu Waxy - Deep F,Kudu Waxy Deep Forest
 
 # Mystery Bundles - Use --holiday flag to map these to holiday buckets via holiday_sale_mappings.csv
 # Do NOT add direct mappings here as they would always use holiday items even in non-holiday mode

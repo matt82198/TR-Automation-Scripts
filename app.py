@@ -2,6 +2,10 @@
 Tannery Row Internal Tools Dashboard
 
 Run with: streamlit run app.py
+
+For Streamlit Cloud deployment:
+- Configure secrets in .streamlit/secrets.toml (see secrets.toml.example)
+- Requires Google OAuth setup for authentication
 """
 
 import streamlit as st
@@ -12,13 +16,37 @@ import csv
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Add scripts dir to path for imports
+# Add utils and scripts dirs to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
 sys.path.insert(0, str(Path(__file__).parent / "scripts"))
+
+# Import authentication utilities
+from auth import check_authentication, show_user_info_sidebar, get_secret
+
+# Import storage utilities (handles cloud vs local automatically)
+from gsheets_storage import (
+    load_missing_inventory, save_missing_inventory,
+    load_coefficients, save_coefficients,
+    is_cloud_deployment
+)
+
 from pending_order_count import SquarespacePanelCalculator
 from payment_fetch import fetch_stripe_readonly, fetch_paypal_readonly
 from order_payment_matcher import match_order_batch
 
-# Page config
+# =============================================================================
+# Authentication Check
+# =============================================================================
+# This must run before any other Streamlit commands on cloud deployment
+
+if is_cloud_deployment():
+    if not check_authentication():
+        st.stop()
+
+# =============================================================================
+# Page Configuration (after auth check)
+# =============================================================================
+
 st.set_page_config(
     page_title="Tannery Row Tools",
     page_icon="🏭",
@@ -34,31 +62,20 @@ tool = st.sidebar.radio(
     ["Payment Fetch", "Order Payment Matcher", "Pending Order Count", "Mystery Bundle Counter", "Leather Weight Calculator", "Swatch Book Generator"]
 )
 
+# Show user info in sidebar (if authenticated on cloud)
+if is_cloud_deployment():
+    show_user_info_sidebar()
+
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 OUTPUT_DIR = Path(__file__).parent / "output"
 CONFIG_DIR = Path(__file__).parent / "config"
 OUTPUT_DIR.mkdir(exist_ok=True)
 MISSING_INVENTORY_FILE = CONFIG_DIR / "missing_inventory.csv"
+COEFFICIENTS_FILE = CONFIG_DIR / "leather_weight_coefficients.csv"
 
 
-def load_missing_inventory():
-    """Load missing inventory items from CSV"""
-    missing = set()
-    if MISSING_INVENTORY_FILE.exists():
-        with open(MISSING_INVENTORY_FILE, 'r', newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                missing.add(row['unique_id'])
-    return missing
-
-
-def save_missing_inventory(missing_ids: set):
-    """Save missing inventory items to CSV"""
-    with open(MISSING_INVENTORY_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['unique_id', 'date_marked'])
-        for uid in sorted(missing_ids):
-            writer.writerow([uid, datetime.now().strftime('%Y-%m-%d')])
+# Note: load_missing_inventory and save_missing_inventory are now imported from gsheets_storage
+# They automatically handle cloud vs local storage
 
 
 def run_script(cmd, description):
@@ -159,7 +176,7 @@ elif tool == "Order Payment Matcher":
         if not order_numbers:
             st.error("Please enter at least one order number")
         else:
-            ss_api_key = os.environ.get("SQUARESPACE_API_KEY")
+            ss_api_key = get_secret("SQUARESPACE_API_KEY")
             if not ss_api_key:
                 st.error("SQUARESPACE_API_KEY environment variable not set")
             else:
@@ -237,7 +254,7 @@ elif tool == "Pending Order Count":
 
     # Initialize session state for missing items
     if 'missing_inventory' not in st.session_state:
-        st.session_state.missing_inventory = load_missing_inventory()
+        st.session_state.missing_inventory = load_missing_inventory(MISSING_INVENTORY_FILE)
 
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -248,7 +265,7 @@ elif tool == "Pending Order Count":
 
     # Fetch orders if not cached
     if 'product_counts' not in st.session_state:
-        api_key = os.environ.get("SQUARESPACE_API_KEY")
+        api_key = get_secret("SQUARESPACE_API_KEY")
         if not api_key:
             st.error("SQUARESPACE_API_KEY environment variable not set")
         else:
@@ -377,7 +394,7 @@ elif tool == "Pending Order Count":
         # Save if changed
         if updated_missing != missing:
             st.session_state.missing_inventory = updated_missing
-            save_missing_inventory(updated_missing)
+            save_missing_inventory(updated_missing, MISSING_INVENTORY_FILE)
             st.toast("Missing inventory updated!")
 
 
@@ -398,7 +415,7 @@ elif tool == "Mystery Bundle Counter":
     # Fetch and count if not cached or status changed
     cache_key = f'mystery_results_{status_filter}'
     if cache_key not in st.session_state:
-        api_key = os.environ.get("SQUARESPACE_API_KEY")
+        api_key = get_secret("SQUARESPACE_API_KEY")
         if not api_key:
             st.error("SQUARESPACE_API_KEY environment variable not set")
         else:
@@ -482,10 +499,11 @@ elif tool == "Leather Weight Calculator":
     st.header("Leather Weight Calculator")
     st.markdown("Calculate box weights for shipping based on leather weight coefficients (lbs per sq ft).")
 
-    from leather_weight_calculator import load_coefficients, save_coefficients, calculate_coefficient, estimate_box_weight, find_leather
+    # Note: load_coefficients and save_coefficients are imported from gsheets_storage
+    # They automatically handle cloud vs local storage
 
     # Load coefficients
-    coefficients = load_coefficients()
+    coefficients = load_coefficients(COEFFICIENTS_FILE)
 
     # Tabs for different operations
     tab1, tab2, tab3 = st.tabs(["Estimate Box Weight", "Calculate Coefficient", "Stored Coefficients"])
@@ -546,7 +564,7 @@ elif tool == "Leather Weight Calculator":
                         'last_updated': datetime.now().strftime('%Y-%m-%d'),
                         'notes': notes
                     }
-                    save_coefficients(coefficients)
+                    save_coefficients(coefficients, COEFFICIENTS_FILE)
                     st.success(f"Saved: {leather_name} = {new_coefficient:.4f} lbs/sqft")
                     st.rerun()
 

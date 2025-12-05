@@ -7,12 +7,24 @@ from datetime import datetime, timedelta
 import argparse
 from typing import List, Dict, Any, Optional
 
+
+def get_secret(key: str, default: str = None) -> str:
+    """Get secret from Streamlit secrets or environment variable."""
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.environ.get(key, default)
+
+
 # API Keys - READ-ONLY access
-stripe.api_key = os.environ.get('STRIPE_API_KEY')
-PAYPAL_CLIENT_ID = os.environ.get('PAYPAL_CLIENT_ID')
-PAYPAL_CLIENT_SECRET = os.environ.get('PAYPAL_CLIENT_SECRET')
+stripe.api_key = get_secret('STRIPE_API_KEY')
+PAYPAL_CLIENT_ID = get_secret('PAYPAL_CLIENT_ID')
+PAYPAL_CLIENT_SECRET = get_secret('PAYPAL_CLIENT_SECRET')
 # PAYPAL_MODE defaults to 'live' (your real account). Only set to 'sandbox' for testing
-PAYPAL_MODE = os.environ.get('PAYPAL_MODE', 'live')
+PAYPAL_MODE = get_secret('PAYPAL_MODE', 'live')
 
 
 def parse_arguments():
@@ -107,9 +119,11 @@ def fetch_stripe_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
                         pass
 
                 billing = charge.billing_details or {}
+                charge_dt = datetime.fromtimestamp(charge.created)
 
                 transactions.append({
-                    'date': datetime.fromtimestamp(charge.created).strftime('%Y-%m-%d'),
+                    'date': charge_dt.strftime('%Y-%m-%d'),
+                    'sort_datetime': charge_dt.isoformat(),
                     'customer_name': billing.get('name', 'N/A'),
                     'customer_email': billing.get('email', charge.receipt_email or 'N/A'),
                     'gross_amount': gross,
@@ -197,15 +211,19 @@ def fetch_paypal_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
             name_info = payer.get('payer_name', {})
             name = f"{name_info.get('given_name', '')} {name_info.get('surname', '')}".strip()
 
-            date_str = info.get('transaction_initiated_date', '')
+            # Try transaction_initiated_date first, fall back to transaction_updated_date
+            date_str = info.get('transaction_initiated_date', '') or info.get('transaction_updated_date', '')
             if date_str:
                 dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                 formatted_date = dt.strftime('%Y-%m-%d')
+                sort_datetime = dt.isoformat()
             else:
                 formatted_date = start_date
+                sort_datetime = f"{start_date}T00:00:00+00:00"
 
             transactions.append({
                 'date': formatted_date,
+                'sort_datetime': sort_datetime,
                 'customer_name': name or 'N/A',
                 'customer_email': payer.get('email_address', 'N/A'),
                 'gross_amount': gross,
@@ -280,8 +298,10 @@ def export_csv(transactions: List[Dict[str, Any]], start_date: str, end_date: st
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
 
-        for txn in sorted(transactions, key=lambda x: x['date']):
-            writer.writerow(txn)
+        for txn in sorted(transactions, key=lambda x: x.get('sort_datetime', x['date'])):
+            # Exclude sort_datetime from output (only used for sorting)
+            row = {k: v for k, v in txn.items() if k in fields}
+            writer.writerow(row)
 
     print(f"\nSUCCESS: Exported to {filename}")
 

@@ -18,8 +18,20 @@ from typing import Dict, List, Tuple
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
+def get_secret(key: str, default: str = None) -> str:
+    """Get secret from Streamlit secrets or environment variable."""
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.environ.get(key, default)
+
+
 # Squarespace API configuration
-SQUARESPACE_API_KEY = os.environ.get('SQUARESPACE_API_KEY')
+SQUARESPACE_API_KEY = get_secret('SQUARESPACE_API_KEY')
 SQUARESPACE_API_URL = "https://api.squarespace.com/1.0/commerce/orders"
 
 

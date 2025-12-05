@@ -11,20 +11,31 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 
+def get_secret(key: str, default: str = None) -> str:
+    """Get secret from Streamlit secrets or environment variable."""
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.environ.get(key, default)
+
+
 # Squarespace API Configuration
-SQUARESPACE_API_KEY = os.environ.get('SQUARESPACE_API_KEY')
+SQUARESPACE_API_KEY = get_secret('SQUARESPACE_API_KEY')
 SQUARESPACE_API_VERSION = '1.0'
 SQUARESPACE_BASE_URL = f'https://api.squarespace.com/{SQUARESPACE_API_VERSION}'
 
 # Sales Tax Configuration - set your business state
-SHIP_FROM_STATE = os.environ.get('SHIP_FROM_STATE', 'GA')  # Default: Georgia
+SHIP_FROM_STATE = get_secret('SHIP_FROM_STATE', 'GA')  # Default: Georgia
 
 # Email Configuration (optional - for daily automation)
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
-EMAIL_USER = os.environ.get('EMAIL_USER')
-EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
-EMAIL_RECIPIENT = os.environ.get('EMAIL_RECIPIENT', 'matt@thetanneryrow.com')
+EMAIL_HOST = get_secret('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(get_secret('EMAIL_PORT', '587'))
+EMAIL_USER = get_secret('EMAIL_USER')
+EMAIL_PASSWORD = get_secret('EMAIL_PASSWORD')
+EMAIL_RECIPIENT = get_secret('EMAIL_RECIPIENT', 'matt@thetanneryrow.com')
 
 
 def parse_arguments():
@@ -359,6 +370,8 @@ class ProductMapper:
         'sale ',
         'holiday',
         'margot fog',  # Virgilio Margot Fog holiday sale items
+        'puttman',  # Horween Puttman holiday sale
+        'chromexcel single horsefronts',  # Horween Chromexcel SHF holiday sale
     ]
 
     def __init__(self):
@@ -712,6 +725,7 @@ class CustomerMatcher:
         self.email_map = {}  # email -> customer_name
         self.phone_map = {}  # phone -> customer_name
         self.lastname_map = {}  # lastname -> [customer_names]
+        self.firstname_map = {}  # firstname -> [customer_names]
 
     def load_existing_customers(self, csv_file: str) -> None:
         """
@@ -749,6 +763,21 @@ class CustomerMatcher:
                         self.phone_map[phone_normalized] = name
                         customer_record['phone'] = phone_normalized
 
+                    # First name mapping
+                    first_name = row.get('First Name', '').strip()
+                    if not first_name:
+                        # Try to extract from customer name
+                        contact = row.get('Contact', '') or row.get('Full Name', '') or name
+                        if ' ' in contact:
+                            first_name = contact.split()[0]
+
+                    if first_name:
+                        first_name_lower = first_name.lower()
+                        if first_name_lower not in self.firstname_map:
+                            self.firstname_map[first_name_lower] = []
+                        self.firstname_map[first_name_lower].append(name)
+                        customer_record['first_name'] = first_name
+
                     # Last name mapping
                     last_name = row.get('Last Name', '').strip()
                     if not last_name:
@@ -762,12 +791,14 @@ class CustomerMatcher:
                         if last_name_lower not in self.lastname_map:
                             self.lastname_map[last_name_lower] = []
                         self.lastname_map[last_name_lower].append(name)
+                        customer_record['last_name'] = last_name
 
                     self.customers.append(customer_record)
 
             print(f"  Loaded {len(self.customers)} existing customers")
             print(f"  Email lookups: {len(self.email_map)}")
             print(f"  Phone lookups: {len(self.phone_map)}")
+            print(f"  First name index: {len(self.firstname_map)} unique first names")
             print(f"  Last name index: {len(self.lastname_map)} unique last names")
 
         except Exception as e:
@@ -775,12 +806,12 @@ class CustomerMatcher:
 
     def find_match(self, email: str, phone: str, first_name: str, last_name: str) -> Optional[str]:
         """
-        Try to find existing customer by:
-        1. Email (exact match)
-        2. Phone (normalized match)
-        3. Last name + first name (fuzzy)
+        Try to find existing customer by (in order of reliability):
+        1. Email (exact match) - most reliable
+        2. Phone (normalized match) - very reliable
+        3. First + Last name (partial match required) - requires BOTH to match
 
-        Returns: Existing customer name or None
+        Returns: Existing customer name or None (create new customer if None)
         """
         # 1. Try email match (most reliable)
         if email:
@@ -788,30 +819,42 @@ class CustomerMatcher:
             if email_lower in self.email_map:
                 return self.email_map[email_lower]
 
-        # 2. Try phone match
+        # 2. Try phone match (very reliable)
         if phone:
             phone_normalized = normalize_for_matching(phone)
-            if phone_normalized in self.phone_map:
+            if phone_normalized and phone_normalized in self.phone_map:
                 return self.phone_map[phone_normalized]
 
-        # 3. Try last name + first name match
-        if last_name:
+        # 3. Try name match - MUST have both first AND last name match
+        # Last name alone is NOT sufficient (too many false positives)
+        if first_name and last_name:
+            first_normalized = normalize_for_matching(first_name)
             last_name_lower = last_name.strip().lower()
+
             if last_name_lower in self.lastname_map:
                 candidates = self.lastname_map[last_name_lower]
 
-                # If only one person with that last name, match it
-                if len(candidates) == 1:
-                    return candidates[0]
-
-                # Multiple matches - try to narrow by first name
-                if first_name:
-                    first_normalized = normalize_for_matching(first_name)
-                    for candidate in candidates:
-                        # Check if first name appears in the customer name
-                        if first_normalized in normalize_for_matching(candidate):
+                for candidate in candidates:
+                    candidate_normalized = normalize_for_matching(candidate)
+                    # Check if first name (or partial) appears in the customer name
+                    # This handles "Robert" matching "Robert F Tanner" or "Bob" matching "Robert Bob Smith"
+                    if first_normalized and len(first_normalized) >= 2:
+                        # Check for partial first name match (at least 2 chars)
+                        if first_normalized in candidate_normalized:
                             return candidate
+                        # Also check if candidate's first part matches our first name
+                        candidate_parts = candidate.split()
+                        if candidate_parts:
+                            candidate_first = normalize_for_matching(candidate_parts[0])
+                            if candidate_first and first_normalized in candidate_first:
+                                return candidate
+                            # Check middle name too if exists
+                            if len(candidate_parts) > 2:
+                                candidate_middle = normalize_for_matching(candidate_parts[1])
+                                if candidate_middle and first_normalized in candidate_middle:
+                                    return candidate
 
+        # No match found - will create new customer
         return None
 
 
@@ -826,17 +869,17 @@ def is_in_state_order(order: Dict[str, Any], ship_from_state: str) -> bool:
     Returns:
         True if in-state (charge tax), False if out-of-state (no tax)
     """
-    # Get shipping address state
-    shipping_address = order.get('shippingAddress', {})
-    ship_to_state = shipping_address.get('state', '').strip().upper()
+    # Get shipping address state (handle None explicitly)
+    shipping_address = order.get('shippingAddress') or {}
+    ship_to_state = (shipping_address.get('state', '') or '').strip().upper()
 
     # Normalize ship_from_state
     ship_from_normalized = ship_from_state.strip().upper()
 
     # If no shipping address, try billing address
     if not ship_to_state:
-        billing_address = order.get('billingAddress', {})
-        ship_to_state = billing_address.get('state', '').strip().upper()
+        billing_address = order.get('billingAddress') or {}
+        ship_to_state = (billing_address.get('state', '') or '').strip().upper()
 
     # Compare states
     return ship_to_state == ship_from_normalized
@@ -1067,8 +1110,11 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 ship_zip = (shipping.get('postalCode', '') or '').replace('\n', ' ').replace('\r', ' ')
                 ship_city_state_zip = f"{ship_city}, {ship_state} {ship_zip}".strip()
 
-                # Ship to address for customer record - name on first line
-                saddr1 = customer_name[:40]  # Customer name on first line
+                # Ship to address for customer record - SHIPPING RECIPIENT name on first line
+                ship_first = (shipping.get('firstName', '') or '').strip()
+                ship_last = (shipping.get('lastName', '') or '').strip()
+                ship_recipient_name = f"{ship_first} {ship_last}".strip() if ship_first or ship_last else customer_name
+                saddr1 = ship_recipient_name[:40]  # Shipping recipient name on first line
                 saddr2 = ship_addr1  # Street address
                 saddr3 = ship_city_state_zip  # City, State ZIP
                 saddr4 = ship_address2_raw if ship_address2_raw else ''  # Apt/Suite if exists
@@ -1115,10 +1161,10 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
     print(f"  Creating invoice file: {invoice_filename}")
 
     with open(invoice_filename, 'w', encoding='utf-8') as f:
-        # Invoice headers without address fields - addresses come from customer record
-        f.write("!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tSHIPDATE\tSHIPVIA\tREP\n")
-        # Line items - minimal fields only (INVITEMDESC, OTHER1, TAXABLE not supported)
-        f.write("!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tQNTY\tPRICE\tINVITEM\n")
+        # Invoice headers with ship-to address fields (ADDR1-5 = ship-to address per invoice)
+        f.write("!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tSHIPDATE\tSHIPVIA\tREP\tADDR1\tADDR2\tADDR3\tADDR4\tADDR5\n")
+        # Line items - MEMO for line item descriptions (promo codes, discount names)
+        f.write("!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tQNTY\tPRICE\tINVITEM\tMEMO\n")
         f.write("!ENDTRNS\n")
 
         # Create invoices
@@ -1183,7 +1229,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 bill_addr4 = '' if bill_country_code == 'US' else bill_country_code
                 bill_addr5 = ''
 
-            # Get Ship To address - clean format with name on first line
+            # Get Ship To address - clean format with recipient name on first line
             shipping = order.get('shippingAddress') or {}
             ship_street1 = (shipping.get('address1', '') or '').replace('\n', ' ').replace('\r', ' ')[:40]
             ship_address2_raw = (shipping.get('address2', '') or '').replace('\n', ' ').replace('\r', ' ')
@@ -1195,8 +1241,11 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             ship_country_code = shipping.get('countryCode', '').strip().upper()
 
-            # Build ship-to address with customer name on first line
-            ship_addr1 = customer_name[:40]  # Customer name on first line
+            # Build ship-to address with SHIPPING RECIPIENT name on first line (may differ from customer)
+            ship_first = (shipping.get('firstName', '') or '').strip()
+            ship_last = (shipping.get('lastName', '') or '').strip()
+            ship_recipient_name = f"{ship_first} {ship_last}".strip() if ship_first or ship_last else customer_name
+            ship_addr1 = ship_recipient_name[:40]  # Shipping recipient name on first line
             if ship_address2_raw:
                 # Has apt/suite: Name, Street, Apt, City/State/ZIP
                 ship_addr2 = ship_street1
@@ -1222,10 +1271,11 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
             # Determine invoice number: use SS order number with prefix if flag is set, otherwise blank
             invoice_number = f"SS-{order_number}" if use_ss_invoice_numbers else ''
 
-            # TRNS line - Invoice header without addresses (addresses come from customer record)
+            # TRNS line - Invoice header with per-order ship-to address
             # REP field left blank - QuickBooks requires Name:EntityType:Initials format if used
+            # ADDR1-5 = ship-to address for this invoice (can differ from customer default)
             f.write(f"TRNS\t\tINVOICE\t{invoice_date}\t{ar_account}\t{customer_name}\t{invoice_total}\t{invoice_number}\t"
-                   f"{ship_date}\tUPS\t\n")
+                   f"{ship_date}\tUPS\t\t{ship_addr1}\t{ship_addr2}\t\"{ship_addr3}\"\t{ship_addr4}\t{ship_addr5}\n")
 
             # SPL lines - Line items with product mapping, quantity, pieces, price, description
             # Tax is handled by customer tax code, not per-item
@@ -1267,43 +1317,50 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                 # Calculate line total (unit_price already extracted above for mapping)
                 line_total = -(quantity * unit_price)  # Negative for QB convention
 
-                # Write line item - minimal fields only (no INVITEMDESC, OTHER1, or TAXABLE)
-                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{line_total}\t{quantity}\t{unit_price}\t{qb_item}\n")
+                # Write line item (empty INVITEMDESC - testing if QB uses item default or blanks it)
+                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{line_total}\t{quantity}\t{unit_price}\t{qb_item}\t\n")
 
-            # Discount line items - capture discount codes and gift cards as "Non-inventory Item"
-            discounts = order.get('discountTotal', {}).get('value', 0)
-            discounts = float(discounts) if discounts else 0.0
-            if discounts > 0:
-                # Get discount code info if available
-                discount_code = ''
-                promo_code = order.get('formSubmission', {})
-                if isinstance(promo_code, list) and promo_code:
-                    for field in promo_code:
-                        if field.get('label', '').lower() in ['discount', 'promo', 'coupon']:
-                            discount_code = field.get('value', '')
-                            break
+            # Discount line items - process each discount from discountLines
+            # Each discount can be: promo code, automatic discount, or gift card
+            discount_lines = order.get('discountLines', [])
+            for disc in discount_lines:
+                disc_amount = float(disc.get('amount', {}).get('value', 0) or 0)
+                if disc_amount <= 0:
+                    continue
 
-                # Check for discount code in order metadata
-                if not discount_code:
-                    discount_code = order.get('discountCode', '')
+                disc_name = disc.get('name', '') or ''
+                disc_promo = disc.get('promoCode', '') or ''
 
-                # Check for gift card redemption
-                gift_card = order.get('giftCardRedemption', {})
-                if gift_card:
-                    gift_card_code = gift_card.get('giftCardCode', 'Gift Card')
-                    discount_desc = f"Gift Card - {gift_card_code}"
-                elif discount_code:
-                    discount_desc = f"Discount Code - {discount_code}"
+                # Determine QB item and description based on discount type
+                # 1. "Early Access" automatic discount -> specific QB item
+                if 'early access' in disc_name.lower():
+                    qb_discount_item = '2025 Early Access 10% Off'
+                    disc_desc = ''  # Item name is descriptive enough
+                # 2. Promo code entered by customer -> Non-inventory Item with code in desc
+                elif disc_promo:
+                    qb_discount_item = 'Non-inventory Item'
+                    disc_desc = disc_promo  # e.g., CYPRESS2025
+                # 3. Other automatic discounts (Free Samples, etc.) -> Non-inventory Item with name in desc
                 else:
-                    discount_desc = "Discount applied"
+                    qb_discount_item = 'Non-inventory Item'
+                    disc_desc = disc_name  # e.g., "Free Samples with Order"
 
-                # Write discount as "Non-inventory Item" (positive discount = negative amount)
-                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{discounts}\t1\t{-discounts}\tNon-inventory Item\n")
+                # Write discount line with description (positive amount = reduces invoice total in QB)
+                f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{disc_amount}\t1\t{-disc_amount}\t{qb_discount_item}\t{disc_desc}\n")
 
-            # Freight line item - ALWAYS included, even if $0
+            # Also check for gift card redemption (separate from discountLines)
+            gift_card = order.get('giftCardRedemption', {})
+            if gift_card:
+                gc_amount = float(gift_card.get('amount', {}).get('value', 0) or 0)
+                if gc_amount > 0:
+                    gc_code = gift_card.get('giftCardCode', 'Gift Card')
+                    gc_desc = f"Gift Card - {gc_code}"
+                    f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{gc_amount}\t1\t{-gc_amount}\tNon-inventory Item\t{gc_desc}\n")
+
+            # Freight line item - ALWAYS included, even if $0 (no quantity for freight)
             shipping_total = order.get('shippingTotal', {}).get('value', 0)
             shipping_total = float(shipping_total) if shipping_total else 0.0
-            f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{-shipping_total}\t1\t{shipping_total}\tFreight\n")
+            f.write(f"SPL\t\tINVOICE\t{invoice_date}\t{income_account}\t{customer_name}\t{-shipping_total}\t\t{shipping_total}\tFreight\t\n")
 
             # QuickBooks will calculate sales tax automatically based on customer tax code - no manual line item needed
 

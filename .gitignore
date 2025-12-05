@@ -51,3 +51,6 @@ QB_*.csv
 # Gmail OAuth credentials (NEVER commit these!)
 config/gmail_credentials.json
 config/gmail_token.json
+
+# Streamlit secrets (NEVER commit!)
+.streamlit/secrets.toml
