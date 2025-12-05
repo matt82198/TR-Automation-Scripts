@@ -1,5 +1,11 @@
-# CSV files
-*.csv
+# Examples folder (reference files only, except essential config files)
+examples/
+!examples/holiday_sale_mappings.csv
+!examples/customers_backup.csv
+!examples/Holiday Product Mappings 2025.txt
+
+# Output folder
+output/
 
 # IDE files
 .idea/
@@ -22,3 +28,29 @@ Thumbs.db
 
 # Claude Code settings
 .claude/
+
+# Customer data and import tracking (local only, not committed)
+data/customers.csv
+config/import_log.csv
+config/missing_inventory.csv
+config/leather_weight_coefficients.csv
+
+# Generated IIF files
+*.iif
+*_NEW_CUSTOMERS.txt
+*_UNMAPPED_PRODUCTS.txt
+*_ENCRYPTED.zip
+
+# Generated output files
+swatch_book_pages_*/
+swatch_book_reference_*.txt
+swatch_book_complete.txt
+eom_billing_*.csv
+QB_*.csv
+
+# Gmail OAuth credentials (NEVER commit these!)
+config/gmail_credentials.json
+config/gmail_token.json
+
+# Streamlit secrets (NEVER commit!)
+.streamlit/secrets.toml
