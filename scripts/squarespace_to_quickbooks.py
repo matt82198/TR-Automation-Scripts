@@ -76,6 +76,9 @@ def parse_arguments():
                         help='Email address to send IIF file to (requires EMAIL_USER and EMAIL_PASSWORD env vars)')
     parser.add_argument('--use-ss-invoice-numbers', action='store_true',
                         help='Use Squarespace order numbers as QB invoice numbers (default: blank)')
+    parser.add_argument('--invoice-date', type=str,
+                        default=None,
+                        help='Override invoice date for all invoices (MM/DD/YYYY format)')
     return parser.parse_args()
 
 
@@ -372,6 +375,8 @@ class ProductMapper:
         'margot fog',  # Virgilio Margot Fog holiday sale items
         'puttman',  # Horween Puttman holiday sale
         'chromexcel single horsefronts',  # Horween Chromexcel SHF holiday sale
+        'olde english dublin',  # 2025 Holiday Dublin sale
+        'toasted coconut dublin',  # 2025 Holiday Dublin sale
     ]
 
     def __init__(self):
@@ -1003,7 +1008,8 @@ def check_already_imported(order_numbers: List[str], log_file: str = 'config/imp
 def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: str, income_account: str,
                       customer_matcher: Optional[CustomerMatcher] = None,
                       sku_mapper: Optional[ProductMapper] = None,
-                      use_ss_invoice_numbers: bool = False) -> None:
+                      use_ss_invoice_numbers: bool = False,
+                      invoice_date_override: Optional[str] = None) -> None:
     """
     Generate IIF files for bulk invoice import to QuickBooks Desktop
 
@@ -1176,7 +1182,7 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
             # Order details
             order_number = order.get('orderNumber', order.get('id', 'UNKNOWN'))
             created_on = order.get('createdOn', datetime.now().isoformat())
-            invoice_date = format_date_for_qb(created_on)
+            invoice_date = invoice_date_override if invoice_date_override else format_date_for_qb(created_on)
 
             # Ship date - use fulfilledOn if available, otherwise createdOn
             fulfilled_on = order.get('fulfilledOn', created_on)
@@ -1788,7 +1794,7 @@ def main():
         output_file = f"squarespace_invoices_{args.start_date}_to_{args.end_date}.iif"
 
     # Generate IIF file
-    generate_iif_file(orders, output_file, args.ar_account, args.income_account, customer_matcher, sku_mapper, args.use_ss_invoice_numbers)
+    generate_iif_file(orders, output_file, args.ar_account, args.income_account, customer_matcher, sku_mapper, args.use_ss_invoice_numbers, args.invoice_date)
 
     # Email if requested
     if args.email:

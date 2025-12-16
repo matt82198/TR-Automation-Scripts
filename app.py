@@ -37,11 +37,9 @@ from order_payment_matcher import match_order_batch
 # =============================================================================
 # Authentication Check
 # =============================================================================
-# This must run before any other Streamlit commands on cloud deployment
-
-if is_cloud_deployment():
-    if not check_authentication():
-        st.stop()
+# Disabled for local network access - uncomment to re-enable
+# if not check_authentication():
+#     st.stop()
 
 # =============================================================================
 # Page Configuration (after auth check)
@@ -59,12 +57,11 @@ st.markdown("---")
 # Sidebar navigation
 tool = st.sidebar.radio(
     "Select Tool",
-    ["Payment Fetch", "Order Payment Matcher", "Pending Order Count", "Mystery Bundle Counter", "Leather Weight Calculator", "Swatch Book Generator"]
+    ["Payment Fetch", "Order Payment Matcher", "Pending Order Count", "Mystery Bundle Counter", "Leather Weight Calculator", "Swatch Book Generator", "Material Bank Leads"]
 )
 
-# Show user info in sidebar (if authenticated on cloud)
-if is_cloud_deployment():
-    show_user_info_sidebar()
+# Show user info in sidebar (if authenticated)
+# show_user_info_sidebar()  # Disabled for local network access
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 OUTPUT_DIR = Path(__file__).parent / "output"
@@ -619,6 +616,128 @@ elif tool == "Swatch Book Generator":
             st.error("Error generating swatch book")
             if stderr:
                 st.text(stderr)
+
+
+# Material Bank Leads
+elif tool == "Material Bank Leads":
+    st.header("Material Bank Lead Import")
+    st.markdown("Import leads from Material Bank exports into Method CRM and create activities with follow-ups.")
+
+    from materialbank_method import (
+        get_api_key, load_existing_contacts, convert_materialbank_to_method,
+        process_materialbank_import
+    )
+
+    # Check for API key
+    if not get_api_key():
+        st.error("METHOD_API_KEY not configured. Add it to environment variables or Streamlit secrets.")
+        st.stop()
+
+    # File upload
+    uploaded_file = st.file_uploader(
+        "Upload Material Bank Export CSV",
+        type=['csv'],
+        help="Upload the CSV export from Material Bank containing lead data"
+    )
+
+    if uploaded_file:
+        # Load and preview
+        mb_df = pd.read_csv(uploaded_file)
+        st.success(f"Loaded {len(mb_df)} rows from {uploaded_file.name}")
+
+        # Preview
+        with st.expander("Preview Data", expanded=False):
+            st.dataframe(mb_df.head(20))
+
+        # Options
+        col1, col2 = st.columns(2)
+        with col1:
+            check_existing = st.checkbox("Skip existing contacts", value=True,
+                                         help="Check Method CRM for existing contacts and skip duplicates")
+        with col2:
+            create_followups = st.checkbox("Create follow-up activities", value=True,
+                                           help="Create 'Intro EMAIL' follow-up activities for each lead")
+
+        # Analyze button
+        if st.button("Analyze Import", type="secondary"):
+            with st.spinner("Analyzing..."):
+                existing_contacts = {}
+                if check_existing:
+                    existing_contacts = load_existing_contacts()
+                    st.info(f"Found {len(existing_contacts)} existing contacts in Method")
+
+                method_df, stats = convert_materialbank_to_method(mb_df, set(existing_contacts.keys()) if check_existing else None)
+
+                st.subheader("Import Preview")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Rows", stats['total_rows'])
+                with col2:
+                    st.metric("Unique Leads", stats['unique_leads'])
+                with col3:
+                    st.metric("Already Exist", stats['excluded_existing'])
+                with col4:
+                    st.metric("New Leads", stats['new_leads'])
+
+                if len(method_df) > 0:
+                    with st.expander("New Leads to Import", expanded=True):
+                        st.dataframe(method_df[['FirstName', 'LastName', 'CompanyName', 'Email']])
+
+                    # Store in session for import
+                    st.session_state['mb_ready_df'] = mb_df
+                    st.session_state['mb_existing_contacts'] = existing_contacts
+                    st.session_state['mb_stats'] = stats
+                else:
+                    st.warning("No new leads to import - all contacts already exist in Method")
+
+        # Import button (only show if ready)
+        if 'mb_ready_df' in st.session_state:
+            st.divider()
+
+            if st.button("Import to Method CRM", type="primary"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                def progress_callback(msg, pct):
+                    if pct is not None:
+                        progress_bar.progress(pct / 100)
+                    status_text.text(msg)
+
+                with st.spinner("Importing leads and creating activities..."):
+                    results = process_materialbank_import(
+                        st.session_state['mb_ready_df'],
+                        st.session_state['mb_existing_contacts'],
+                        progress_callback
+                    )
+
+                # Show results
+                st.subheader("Import Results")
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Leads Processed", results['leads_processed'])
+                with col2:
+                    st.metric("Activities Created", results['activities_created'])
+                with col3:
+                    st.metric("Follow-ups Created", results['followups_created'])
+
+                if results['errors']:
+                    st.warning(f"{len(results['errors'])} errors occurred")
+                    with st.expander("View Errors"):
+                        for err in results['errors']:
+                            st.text(err)
+
+                if results['details']:
+                    with st.expander("Import Details", expanded=True):
+                        for detail in results['details']:
+                            st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']}")
+
+                # Clear session state
+                del st.session_state['mb_ready_df']
+                del st.session_state['mb_existing_contacts']
+                del st.session_state['mb_stats']
+
+                st.success("Import complete!")
 
 
 # Footer

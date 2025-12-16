@@ -1,15 +1,35 @@
 """
-Authentication utilities for Streamlit Cloud deployment.
+Authentication utilities for Streamlit deployment.
 
-Uses Streamlit's native OIDC authentication with Google Sign-In.
-Requires Streamlit 1.42+ and proper secrets configuration.
+Supports two authentication modes:
+1. Streamlit Cloud: Uses native OIDC authentication (st.user, st.login)
+2. Local/Tunnel: Uses streamlit-google-auth library
+
+Requires proper secrets configuration in .streamlit/secrets.toml
 """
 
 import streamlit as st
 from typing import Optional, List
+import os
 
 # Default authorized domain - employees with this domain get access
 AUTHORIZED_DOMAIN = "@thetanneryrow.com"
+
+# Try to import streamlit-google-auth for local OAuth
+try:
+    from streamlit_google_auth import Authenticate
+    LOCAL_AUTH_AVAILABLE = True
+except ImportError:
+    LOCAL_AUTH_AVAILABLE = False
+
+
+def is_streamlit_cloud() -> bool:
+    """Check if running on Streamlit Cloud (where native st.user actually works)."""
+    # Streamlit Cloud sets specific environment variables
+    # st.user exists in newer Streamlit versions but only works on Cloud
+    return os.environ.get('STREAMLIT_SHARING_MODE') == 'true' or \
+           os.environ.get('IS_STREAMLIT_CLOUD') == 'true' or \
+           'streamlit.app' in os.environ.get('HOSTNAME', '')
 
 
 def get_authorized_emails() -> List[str]:
@@ -56,6 +76,28 @@ def is_user_authorized(email: str) -> bool:
     return False
 
 
+def get_local_authenticator():
+    """Get or create the local OAuth authenticator."""
+    if 'authenticator' not in st.session_state:
+        try:
+            from pathlib import Path
+            auth_config = st.secrets.get('auth', {})
+
+            # Path to credentials file
+            creds_path = Path(__file__).parent.parent / '.streamlit' / 'google_oauth_credentials.json'
+
+            st.session_state.authenticator = Authenticate(
+                secret_credentials_path=str(creds_path),
+                cookie_name='tr_tools_auth',
+                cookie_key=auth_config.get('cookie_secret', 'default_secret_key_change_me'),
+                redirect_uri=auth_config.get('redirect_uri', 'http://localhost:8501'),
+            )
+        except Exception as e:
+            st.error(f"Failed to initialize authenticator: {e}")
+            return None
+    return st.session_state.authenticator
+
+
 def check_authentication() -> bool:
     """
     Check if user is authenticated and authorized.
@@ -65,27 +107,56 @@ def check_authentication() -> bool:
     Returns:
         True if user should proceed, False if blocked
     """
-    # Check if we're in Streamlit Cloud with auth enabled
-    if not hasattr(st, 'user'):
-        # Local development - allow access
+    # Skip auth entirely if SKIP_AUTH is set (for local network access)
+    if os.environ.get('SKIP_AUTH', '').lower() == 'true':
         return True
 
-    # Check if user is logged in
-    if not st.user.is_logged_in:
-        show_login_page()
+    # Mode 1: Streamlit Cloud with native auth
+    if is_streamlit_cloud():
+        if not st.user.is_logged_in:
+            show_login_page()
+            return False
+
+        user_email = getattr(st.user, 'email', None)
+        if not is_user_authorized(user_email):
+            show_unauthorized_page(user_email)
+            return False
+        return True
+
+    # Mode 2: Local/Tunnel with streamlit-google-auth
+    if LOCAL_AUTH_AVAILABLE:
+        authenticator = get_local_authenticator()
+        if authenticator is None:
+            st.error("Authentication not configured properly.")
+            return False
+
+        # Check authentication status
+        authenticator.check_authentification()
+
+        # Get login status from session state
+        if not st.session_state.get('connected', False):
+            show_local_login_page(authenticator)
+            return False
+
+        # Check authorization
+        user_email = st.session_state.get('user_info', {}).get('email')
+        if not is_user_authorized(user_email):
+            show_unauthorized_page(user_email)
+            return False
+
+        return True
+
+    # No auth available - block access when REQUIRE_AUTH is set
+    if os.environ.get('REQUIRE_AUTH', '').lower() == 'true':
+        st.error("Authentication required but not available. Please install streamlit-google-auth.")
         return False
 
-    # Check if user is authorized
-    user_email = getattr(st.user, 'email', None)
-    if not is_user_authorized(user_email):
-        show_unauthorized_page(user_email)
-        return False
-
+    # Local development without auth requirement - allow access
     return True
 
 
 def show_login_page():
-    """Display the login page for unauthenticated users."""
+    """Display the login page for unauthenticated users (Streamlit Cloud)."""
     st.set_page_config(
         page_title="Tannery Row Tools - Login",
         page_icon="🔐",
@@ -101,6 +172,26 @@ def show_login_page():
     with col2:
         if st.button("🔑 Sign in with Google", type="primary", use_container_width=True):
             st.login()
+
+    st.markdown("---")
+    st.caption("Access is restricted to authorized Tannery Row employees.")
+
+
+def show_local_login_page(authenticator):
+    """Display the login page for local/tunnel deployment."""
+    st.set_page_config(
+        page_title="Tannery Row Tools - Login",
+        page_icon="🔐",
+        layout="centered"
+    )
+
+    st.title("🏭 Tannery Row Internal Tools")
+    st.markdown("---")
+
+    st.info("Please sign in with your company Google account to access the tools.")
+
+    # Use streamlit-google-auth login button
+    authenticator.login()
 
     st.markdown("---")
     st.caption("Access is restricted to authorized Tannery Row employees.")
@@ -126,8 +217,13 @@ def show_unauthorized_page(email: Optional[str] = None):
     **Need access?** Contact your administrator to be added to the authorized users list.
     """)
 
-    if st.button("🔓 Sign out and try another account"):
-        st.logout()
+    # Logout button for both modes
+    if is_streamlit_cloud():
+        if st.button("🔓 Sign out and try another account"):
+            st.logout()
+    elif LOCAL_AUTH_AVAILABLE and 'authenticator' in st.session_state:
+        if st.button("🔓 Sign out and try another account"):
+            st.session_state.authenticator.logout()
 
 
 def show_user_info_sidebar():
@@ -135,12 +231,23 @@ def show_user_info_sidebar():
     Display user info and logout button in the sidebar.
     Call this after authentication check passes.
     """
-    if hasattr(st, 'user') and st.user.is_logged_in:
+    # Streamlit Cloud mode
+    if is_streamlit_cloud() and st.user.is_logged_in:
         st.sidebar.markdown("---")
         st.sidebar.markdown(f"**Logged in as:**")
         st.sidebar.markdown(f"📧 {st.user.email}")
         if st.sidebar.button("🚪 Sign out", use_container_width=True):
             st.logout()
+    # Local/Tunnel mode
+    elif LOCAL_AUTH_AVAILABLE and st.session_state.get('connected', False):
+        user_info = st.session_state.get('user_info', {})
+        email = user_info.get('email', 'Unknown')
+        st.sidebar.markdown("---")
+        st.sidebar.markdown(f"**Logged in as:**")
+        st.sidebar.markdown(f"📧 {email}")
+        if st.sidebar.button("🚪 Sign out", use_container_width=True):
+            if 'authenticator' in st.session_state:
+                st.session_state.authenticator.logout()
 
 
 def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:

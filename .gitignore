@@ -54,3 +54,17 @@ config/gmail_token.json
 
 # Streamlit secrets (NEVER commit!)
 .streamlit/secrets.toml
+.streamlit/google_oauth_credentials.json
+
+# Material Bank / Method CRM data files (contain PII)
+MethodMaterialBankThreadRipper/*.csv
+MethodMaterialBankThreadRipper/*.xlsx
+MethodMaterialBankThreadRipper/.env
+
+# Temp/junk files
+nul
+=1.3.2
+output_test
+
+# Squarespace invoice exports
+squarespace_invoices_*
