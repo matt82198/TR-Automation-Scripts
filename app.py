@@ -35,6 +35,143 @@ from payment_fetch import fetch_stripe_readonly, fetch_paypal_readonly
 from order_payment_matcher import match_order_batch
 
 # =============================================================================
+# Tool Configuration
+# =============================================================================
+
+TOOL_CATEGORIES = {
+    "Billing & Payments": {
+        "icon": "💰",
+        "tools": {
+            "Payment Fetch": {
+                "description": "Pull EOM billing reports from Stripe and PayPal",
+                "permission": "admin"
+            },
+            "Order Payment Matcher": {
+                "description": "Match orders to payment transactions",
+                "permission": "admin"
+            }
+        }
+    },
+    "Order Management": {
+        "icon": "📦",
+        "tools": {
+            "Pending Order Count": {
+                "description": "Count pending panels and swatch books",
+                "permission": "standard"
+            },
+            "Mystery Bundle Counter": {
+                "description": "Track mystery bundle inventory",
+                "permission": "standard"
+            }
+        }
+    },
+    "Inventory & Shipping": {
+        "icon": "🚚",
+        "tools": {
+            "Leather Weight Calculator": {
+                "description": "Calculate box weights for shipping",
+                "permission": "standard"
+            },
+            "Swatch Book Generator": {
+                "description": "Generate swatch book page layouts",
+                "permission": "standard"
+            }
+        }
+    },
+    "Customer Management": {
+        "icon": "👥",
+        "tools": {
+            "Material Bank Leads": {
+                "description": "Import leads to Method CRM",
+                "permission": "materialbank"
+            }
+        }
+    }
+}
+
+# Permissions file
+PERMISSIONS_FILE = Path(__file__).parent / "config" / "tool_permissions.csv"
+
+def load_user_permissions():
+    """Load user permissions from CSV file."""
+    permissions = {}
+    if PERMISSIONS_FILE.exists():
+        with open(PERMISSIONS_FILE, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                email = row.get('email', '').strip().lower()
+                if email and not email.startswith('#'):
+                    permissions[email] = {
+                        'role': row.get('role', 'standard').strip().lower(),
+                        'tools': row.get('tools', '').strip(),
+                        'materialbank': row.get('materialbank', '').strip().lower() == 'true'
+                    }
+    return permissions
+
+def get_user_permissions():
+    """Get the current user's full permissions."""
+    # For local development, default to admin with all access
+    if not is_cloud_deployment():
+        return {"role": "admin", "tools": "all", "materialbank": True}
+
+    # Check session for authenticated user email
+    user_email = st.session_state.get("user_email", "").lower()
+    permissions = load_user_permissions()
+
+    if user_email in permissions:
+        return permissions[user_email]
+
+    return {"role": "none", "tools": "", "materialbank": False}
+
+def get_user_role():
+    """Get the current user's role (for display purposes)."""
+    perms = get_user_permissions()
+    return perms['role'], perms['tools']
+
+def has_permission(tool_name, tool_permission_level):
+    """Check if current user has permission for a tool."""
+    user_perms = get_user_permissions()
+    user_role = user_perms['role']
+
+    # Admin has all access
+    if user_role == "admin":
+        return True
+
+    # No role = no access
+    if user_role == "none":
+        return False
+
+    # Material Bank requires special flag
+    if tool_permission_level == "materialbank":
+        return user_perms.get('materialbank', False)
+
+    # Custom role - check specific tools
+    if user_role == "custom":
+        allowed_tools = [t.strip() for t in user_perms['tools'].split(';')]
+        return tool_name in allowed_tools
+
+    # Standard role - only standard permission tools
+    if user_role == "standard":
+        return tool_permission_level == "standard"
+
+    return False
+
+def get_available_tools():
+    """Get list of tools available to the current user."""
+    available = {}
+    for category, cat_data in TOOL_CATEGORIES.items():
+        category_tools = {}
+        for tool_name, tool_data in cat_data["tools"].items():
+            if has_permission(tool_name, tool_data["permission"]):
+                category_tools[tool_name] = tool_data
+        if category_tools:
+            available[category] = {
+                "icon": cat_data["icon"],
+                "tools": category_tools
+            }
+    return available
+
+# =============================================================================
 # Authentication Check
 # =============================================================================
 # Disabled for local network access - uncomment to re-enable
@@ -42,7 +179,7 @@ from order_payment_matcher import match_order_batch
 #     st.stop()
 
 # =============================================================================
-# Page Configuration (after auth check)
+# Page Configuration
 # =============================================================================
 
 st.set_page_config(
@@ -52,16 +189,59 @@ st.set_page_config(
 )
 
 st.title("Tannery Row Internal Tools")
+
+# Show user role badge
+user_role, _ = get_user_role()
+if user_role == "admin":
+    st.caption("🔑 Admin Access")
+
 st.markdown("---")
 
-# Sidebar navigation
-tool = st.sidebar.radio(
-    "Select Tool",
-    ["Payment Fetch", "Order Payment Matcher", "Pending Order Count", "Mystery Bundle Counter", "Leather Weight Calculator", "Swatch Book Generator", "Material Bank Leads"]
-)
+# =============================================================================
+# Sidebar Navigation with Categories
+# =============================================================================
+
+available_tools = get_available_tools()
+
+# Build tool list for selection
+tool_list = []
+tool_to_category = {}
+
+st.sidebar.title("Navigation")
+
+for category, cat_data in available_tools.items():
+    st.sidebar.markdown(f"### {cat_data['icon']} {category}")
+    for tool_name, tool_data in cat_data["tools"].items():
+        tool_list.append(tool_name)
+        tool_to_category[tool_name] = category
+
+# Tool selection
+if tool_list:
+    tool = st.sidebar.radio(
+        "Select Tool",
+        tool_list,
+        label_visibility="collapsed"
+    )
+else:
+    st.error("No tools available for your access level.")
+    st.stop()
+
+# Show tool description
+if tool in tool_to_category:
+    for cat_data in available_tools.values():
+        if tool in cat_data["tools"]:
+            st.sidebar.caption(cat_data["tools"][tool]["description"])
+            break
 
 # Show user info in sidebar (if authenticated)
 # show_user_info_sidebar()  # Disabled for local network access
+
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Role: {user_role.title()}")
+
+# =============================================================================
+# Paths
+# =============================================================================
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 OUTPUT_DIR = Path(__file__).parent / "output"
@@ -69,10 +249,6 @@ CONFIG_DIR = Path(__file__).parent / "config"
 OUTPUT_DIR.mkdir(exist_ok=True)
 MISSING_INVENTORY_FILE = CONFIG_DIR / "missing_inventory.csv"
 COEFFICIENTS_FILE = CONFIG_DIR / "leather_weight_coefficients.csv"
-
-
-# Note: load_missing_inventory and save_missing_inventory are now imported from gsheets_storage
-# They automatically handle cloud vs local storage
 
 
 def run_script(cmd, description):
@@ -93,9 +269,12 @@ def run_script(cmd, description):
             return "", str(e), 1
 
 
-# Payment Fetch Tool
+# =============================================================================
+# BILLING & PAYMENTS
+# =============================================================================
+
 if tool == "Payment Fetch":
-    st.header("Payment Fetch")
+    st.header("💰 Payment Fetch")
     st.markdown("Fetch payment data from Stripe and PayPal for a date range.")
 
     col1, col2 = st.columns(2)
@@ -113,27 +292,77 @@ if tool == "Payment Fetch":
         )
 
     if st.button("Fetch Payments", type="primary"):
-        cmd = [
-            "python",
-            str(SCRIPTS_DIR / "payment_fetch.py"),
-            "--start-date", start_date.strftime("%Y-%m-%d"),
-            "--end-date", end_date.strftime("%Y-%m-%d")
-        ]
+        with st.spinner("Fetching payment data..."):
+            try:
+                # Fetch directly using the imported functions
+                start_str = start_date.strftime("%Y-%m-%d")
+                end_str = end_date.strftime("%Y-%m-%d")
 
-        stdout, stderr, code = run_script(cmd, "payment fetch")
+                stripe_txns = fetch_stripe_readonly(start_str, end_str)
+                paypal_txns = fetch_paypal_readonly(start_str, end_str)
 
-        if code == 0:
-            st.success("Payment fetch completed!")
-            st.text(stdout)
-        else:
-            st.error("Error running payment fetch")
-            if stderr:
-                st.text(stderr)
+                # Calculate summaries
+                stripe_gross = sum(t.get('gross', 0) for t in stripe_txns)
+                stripe_fees = sum(t.get('fee', 0) for t in stripe_txns)
+                stripe_net = sum(t.get('net', 0) for t in stripe_txns)
+
+                paypal_gross = sum(t.get('gross', 0) for t in paypal_txns)
+                paypal_fees = sum(t.get('fee', 0) for t in paypal_txns)
+                paypal_net = sum(t.get('net', 0) for t in paypal_txns)
+
+                st.success("Payment fetch completed!")
+
+                # Display summaries
+                st.subheader("Summary")
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.markdown("**Stripe**")
+                    st.write(f"Transactions: {len(stripe_txns)}")
+                    st.write(f"Gross: ${stripe_gross:,.2f}")
+                    st.write(f"Fees: ${stripe_fees:,.2f}")
+                    st.write(f"Net: ${stripe_net:,.2f}")
+
+                with col2:
+                    st.markdown("**PayPal**")
+                    st.write(f"Transactions: {len(paypal_txns)}")
+                    st.write(f"Gross: ${paypal_gross:,.2f}")
+                    st.write(f"Fees: ${paypal_fees:,.2f}")
+                    st.write(f"Net: ${paypal_net:,.2f}")
+
+                with col3:
+                    st.markdown("**Combined**")
+                    st.write(f"Transactions: {len(stripe_txns) + len(paypal_txns)}")
+                    st.write(f"Gross: ${stripe_gross + paypal_gross:,.2f}")
+                    st.write(f"Fees: ${stripe_fees + paypal_fees:,.2f}")
+                    st.write(f"Net: ${stripe_net + paypal_net:,.2f}")
+
+                # Generate CSV for download
+                csv_lines = ["Date,Source,Description,Gross,Fee,Net"]
+                for t in stripe_txns:
+                    csv_lines.append(f"{t.get('date','')},Stripe,{t.get('description','')},{t.get('gross',0):.2f},{t.get('fee',0):.2f},{t.get('net',0):.2f}")
+                for t in paypal_txns:
+                    csv_lines.append(f"{t.get('date','')},PayPal,{t.get('description','')},{t.get('gross',0):.2f},{t.get('fee',0):.2f},{t.get('net',0):.2f}")
+
+                csv_content = "\n".join(csv_lines)
+                filename = f"eom_billing_{start_str}_to_{end_str}.csv"
+
+                st.download_button(
+                    label="Download CSV",
+                    data=csv_content,
+                    file_name=filename,
+                    mime="text/csv",
+                    type="primary"
+                )
+
+            except Exception as e:
+                st.error(f"Error fetching payments: {e}")
+                import traceback
+                st.text(traceback.format_exc())
 
 
-# Order Payment Matcher
 elif tool == "Order Payment Matcher":
-    st.header("Order Payment Matcher")
+    st.header("💰 Order Payment Matcher")
     st.markdown("Match Squarespace order numbers to Stripe/PayPal transactions to get net amounts and fees.")
 
     # Date range for fetching payments
@@ -238,15 +467,32 @@ elif tool == "Order Payment Matcher":
                             for r in unmatched:
                                 st.warning(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f} (No payment match found)")
 
+                        # Generate CSV for download
+                        csv_lines = ["Order Number,Date,Customer,Email,Payment Source,Gross,Net,Fee,Write-off,Matched"]
+                        for r in results:
+                            csv_lines.append(f"{r['order_number']},{r['order_date']},{r['customer_name']},{r['customer_email']},{r['payment_source']},{r['gross_amount']:.2f},{r['net_amount']:.2f},{r['processing_fee']:.2f},{r['write_off']:.2f},{r['matched']}")
+
+                        csv_content = "\n".join(csv_lines)
+                        st.download_button(
+                            label="Download Results CSV",
+                            data=csv_content,
+                            file_name=f"order_payment_match_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                            mime="text/csv",
+                            type="primary"
+                        )
+
                     except Exception as e:
                         st.error(f"Error: {e}")
                         import traceback
                         st.text(traceback.format_exc())
 
 
-# Pending Order Count
+# =============================================================================
+# ORDER MANAGEMENT
+# =============================================================================
+
 elif tool == "Pending Order Count":
-    st.header("Pending Order Count")
+    st.header("📦 Pending Order Count")
     st.markdown("Count pending panels and swatch books from Squarespace orders.")
 
     # Initialize session state for missing items
@@ -394,10 +640,28 @@ elif tool == "Pending Order Count":
             save_missing_inventory(updated_missing, MISSING_INVENTORY_FILE)
             st.toast("Missing inventory updated!")
 
+        # Download CSV button
+        st.divider()
+        csv_lines = ["Type,Product,Variant,Quantity,Missing"]
+        for unique_id, count in panels["counts"].items():
+            details = panels["details"][unique_id]
+            is_missing = "Yes" if unique_id in missing else "No"
+            csv_lines.append(f"Panel,{details['product_name']},{details['variant_description']},{count},{is_missing}")
+        for unique_id, count in swatch_books["counts"].items():
+            details = swatch_books["details"][unique_id]
+            is_missing = "Yes" if unique_id in missing else "No"
+            csv_lines.append(f"Swatch Book,{details['product_name']},{details['variant_description']},{count},{is_missing}")
 
-# Mystery Bundle Counter
+        st.download_button(
+            label="Download Pending Orders CSV",
+            data="\n".join(csv_lines),
+            file_name=f"pending_orders_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            mime="text/csv"
+        )
+
+
 elif tool == "Mystery Bundle Counter":
-    st.header("Mystery Bundle Counter")
+    st.header("📦 Mystery Bundle Counter")
     st.markdown("Count mystery bundle quantities needed from pending Squarespace orders for holiday planning.")
 
     from mystery_bundle_counter import fetch_orders, count_mystery_bundles
@@ -490,14 +754,36 @@ elif tool == "Mystery Bundle Counter":
         else:
             st.info("No orders with mystery bundles.")
 
+        # Download CSV button
+        if results["order_list"]:
+            st.divider()
+            csv_lines = ["Order Number,Customer,Category,Quantity,Variant"]
+            for order_info in results["order_list"]:
+                for bundle in order_info["bundles"]:
+                    csv_lines.append(f"{order_info['order_number']},{order_info['customer']},{bundle['category']},{bundle['qty_display']},")
 
-# Leather Weight Calculator
+            # Add summary
+            csv_lines.append("")
+            csv_lines.append("SUMMARY")
+            csv_lines.append(f"Sides Needed,{grand_sides}")
+            csv_lines.append(f"Double Horsefronts Needed,{grand_horsefronts}")
+            csv_lines.append(f"Double Shoulders Needed,{grand_shoulders}")
+
+            st.download_button(
+                label="Download Mystery Bundles CSV",
+                data="\n".join(csv_lines),
+                file_name=f"mystery_bundles_{status_filter.lower()}_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                mime="text/csv"
+            )
+
+
+# =============================================================================
+# INVENTORY & SHIPPING
+# =============================================================================
+
 elif tool == "Leather Weight Calculator":
-    st.header("Leather Weight Calculator")
+    st.header("🚚 Leather Weight Calculator")
     st.markdown("Calculate box weights for shipping based on leather weight coefficients (lbs per sq ft).")
-
-    # Note: load_coefficients and save_coefficients are imported from gsheets_storage
-    # They automatically handle cloud vs local storage
 
     # Load coefficients
     coefficients = load_coefficients(COEFFICIENTS_FILE)
@@ -589,9 +875,8 @@ elif tool == "Leather Weight Calculator":
                 st.divider()
 
 
-# Swatch Book Generator
 elif tool == "Swatch Book Generator":
-    st.header("Swatch Book Generator")
+    st.header("🚚 Swatch Book Generator")
     st.markdown("Generate a PDF reference guide of all leather colors from the website.")
 
     if st.button("Generate Swatch Book PDF", type="primary"):
@@ -618,15 +903,63 @@ elif tool == "Swatch Book Generator":
                 st.text(stderr)
 
 
-# Material Bank Leads
+# =============================================================================
+# CUSTOMER MANAGEMENT
+# =============================================================================
+
 elif tool == "Material Bank Leads":
-    st.header("Material Bank Lead Import")
+    st.header("👥 Material Bank Lead Import")
     st.markdown("Import leads from Material Bank exports into Method CRM and create activities with follow-ups.")
 
+    import pandas as pd
     from materialbank_method import (
         get_api_key, load_existing_contacts, convert_materialbank_to_method,
         process_materialbank_import
     )
+
+    MATERIALBANK_LOG = CONFIG_DIR / "materialbank_import_log.csv"
+
+    def get_last_import():
+        """Get the last import info from the log."""
+        if not MATERIALBANK_LOG.exists():
+            return None
+        try:
+            with open(MATERIALBANK_LOG, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                if len(lines) > 1:  # Has data beyond header
+                    last_line = lines[-1].strip()
+                    if last_line:
+                        parts = last_line.split(',')
+                        if len(parts) >= 5:
+                            return {
+                                'date': parts[0],
+                                'lead_name': parts[1],
+                                'lead_email': parts[2],
+                                'lead_company': parts[3],
+                                'activities_created': parts[4],
+                                'imported_by': parts[5] if len(parts) > 5 else ''
+                            }
+        except:
+            pass
+        return None
+
+    def log_import(details, total_activities):
+        """Log import details to the CSV."""
+        if not details:
+            return
+        last_detail = details[-1]
+        user_email = st.session_state.get("user_email", "local")
+        with open(MATERIALBANK_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{last_detail['name']},{last_detail['email']},{last_detail['company']},{total_activities},{user_email}\n")
+
+    # Show last import info
+    last_import = get_last_import()
+    if last_import:
+        st.info(f"**Last Import:** {last_import['date']} — {last_import['lead_name']} ({last_import['lead_company']}) — {last_import['activities_created']} activities")
+    else:
+        st.info("No previous imports recorded.")
+
+    st.divider()
 
     # Check for API key
     if not get_api_key():
@@ -732,6 +1065,9 @@ elif tool == "Material Bank Leads":
                         for detail in results['details']:
                             st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']}")
 
+                    # Log the import
+                    log_import(results['details'], results['activities_created'])
+
                 # Clear session state
                 del st.session_state['mb_ready_df']
                 del st.session_state['mb_existing_contacts']
@@ -740,6 +1076,9 @@ elif tool == "Material Bank Leads":
                 st.success("Import complete!")
 
 
+# =============================================================================
 # Footer
+# =============================================================================
+
 st.markdown("---")
-st.caption("Tannery Row Internal Tools")
+st.caption("Tannery Row Internal Tools • v2.0")

@@ -1,0 +1,18 @@
+email,role,tools,materialbank
+# Admins - full access to all tools including billing
+matt@thetanneryrow.com,admin,all,true
+sueeyles@thetanneryrow.com,admin,all,true
+jenna@thetanneryrow.com,admin,all,true
+john@horween.com,admin,all,true
+laura@thetanneryrow.com,admin,all,true
+
+# Standard users - access to Order Management + Inventory & Shipping (not Billing)
+tylerculliton@thetanneryrow.com,standard,,false
+kylegerber@thetanneryrow.com,standard,,false
+stephenrooke@thetanneryrow.com,standard,,false
+
+# To add more users:
+# - admin: full access to all tools
+# - standard: Order Management + Inventory & Shipping tools
+# - custom: list specific tools in the 'tools' column separated by semicolons
+# - materialbank: set to 'true' to enable Material Bank Leads tool

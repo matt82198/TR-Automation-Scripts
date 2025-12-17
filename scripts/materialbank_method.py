@@ -13,16 +13,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
+METHOD_API_KEY = "Njk0MDlkYmUyMTIzYjFhM2MwZjhmZTBmLjEzRjgzMkNEMEIzNTRDRUI5OTJCNjBGQTI4Q0FDQzgz"
+
 def get_api_key():
-    """Get Method API key from environment or Streamlit secrets."""
-    api_key = os.environ.get('METHOD_API_KEY')
-    if not api_key:
-        try:
-            import streamlit as st
-            api_key = st.secrets.get('METHOD_API_KEY')
-        except:
-            pass
-    return api_key
+    """Get Method API key."""
+    return METHOD_API_KEY
 
 
 def get_headers(content_type=False):

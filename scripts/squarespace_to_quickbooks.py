@@ -37,6 +37,9 @@ EMAIL_USER = get_secret('EMAIL_USER')
 EMAIL_PASSWORD = get_secret('EMAIL_PASSWORD')
 EMAIL_RECIPIENT = get_secret('EMAIL_RECIPIENT', 'matt@thetanneryrow.com')
 
+# Output directory for generated files
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output', 'squarespace')
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -79,6 +82,8 @@ def parse_arguments():
     parser.add_argument('--invoice-date', type=str,
                         default=None,
                         help='Override invoice date for all invoices (MM/DD/YYYY format)')
+    parser.add_argument('--customers-only', action='store_true',
+                        help='Only generate new customers file (skip invoices)')
     return parser.parse_args()
 
 
@@ -722,6 +727,34 @@ class ProductMapper:
         return display_name[:31]  # QB item name limit
 
 
+CUSTOMER_IMPORT_LOG = 'config/customer_import_log.csv'
+
+
+def log_imported_customers(customer_records: dict) -> None:
+    """Log newly imported customers to track them between QB exports."""
+    if not customer_records:
+        return
+
+    file_exists = os.path.exists(CUSTOMER_IMPORT_LOG)
+
+    with open(CUSTOMER_IMPORT_LOG, 'a', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(['Customer', 'Email', 'Phone', 'First Name', 'Last Name', 'Date Imported'])
+
+        for cust_name, cust_info in customer_records.items():
+            writer.writerow([
+                cust_name,
+                cust_info.get('email', ''),
+                cust_info.get('phone', ''),
+                cust_info.get('first_name', ''),
+                cust_info.get('last_name', ''),
+                datetime.now().strftime('%Y-%m-%d %H:%M')
+            ])
+
+    print(f"  Logged {len(customer_records)} new customer(s) to {CUSTOMER_IMPORT_LOG}")
+
+
 class CustomerMatcher:
     """Smart customer matching to avoid duplicates"""
 
@@ -731,6 +764,56 @@ class CustomerMatcher:
         self.phone_map = {}  # phone -> customer_name
         self.lastname_map = {}  # lastname -> [customer_names]
         self.firstname_map = {}  # firstname -> [customer_names]
+
+    def load_customer_import_log(self) -> None:
+        """Load customers from our import log (customers added since last QB export)."""
+        if not os.path.exists(CUSTOMER_IMPORT_LOG):
+            return
+
+        print(f"Loading customer import log: {CUSTOMER_IMPORT_LOG}")
+        count = 0
+
+        try:
+            with open(CUSTOMER_IMPORT_LOG, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    name = row.get('Customer', '').strip()
+                    if not name:
+                        continue
+
+                    # Add to email map
+                    email = row.get('Email', '').strip().lower()
+                    if email and email not in self.email_map:
+                        self.email_map[email] = name
+
+                    # Add to phone map
+                    phone = normalize_for_matching(row.get('Phone', ''))
+                    if phone and phone not in self.phone_map:
+                        self.phone_map[phone] = name
+
+                    # Add to name maps
+                    first_name = row.get('First Name', '').strip()
+                    last_name = row.get('Last Name', '').strip()
+
+                    if first_name:
+                        first_lower = first_name.lower()
+                        if first_lower not in self.firstname_map:
+                            self.firstname_map[first_lower] = []
+                        if name not in self.firstname_map[first_lower]:
+                            self.firstname_map[first_lower].append(name)
+
+                    if last_name:
+                        last_lower = last_name.lower()
+                        if last_lower not in self.lastname_map:
+                            self.lastname_map[last_lower] = []
+                        if name not in self.lastname_map[last_lower]:
+                            self.lastname_map[last_lower].append(name)
+
+                    count += 1
+
+            print(f"  Loaded {count} previously imported customer(s)")
+        except Exception as e:
+            print(f"Warning: Could not load customer import log: {e}")
 
     def load_existing_customers(self, csv_file: str) -> None:
         """
@@ -1009,7 +1092,8 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                       customer_matcher: Optional[CustomerMatcher] = None,
                       sku_mapper: Optional[ProductMapper] = None,
                       use_ss_invoice_numbers: bool = False,
-                      invoice_date_override: Optional[str] = None) -> None:
+                      invoice_date_override: Optional[str] = None,
+                      customers_only: bool = False) -> None:
     """
     Generate IIF files for bulk invoice import to QuickBooks Desktop
 
@@ -1161,6 +1245,57 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                        f"{cust_info['phone']}\t{cust_info['email']}\t"
                        f"{cust_info['taxable']}\t{cust_info['tax_code']}\t"
                        f"{cust_info['company_name']}\t{cust_info['first_name']}\t{cust_info['last_name']}\n")
+
+        # Log newly imported customers to track between QB exports
+        log_imported_customers(customer_records)
+
+    # If customers-only mode, skip invoice generation
+    if customers_only:
+        print(f"\n{'='*60}")
+        print(f"CUSTOMERS-ONLY MODE")
+        print(f"{'='*60}")
+        if customer_records:
+            print(f"NEW CUSTOMERS FILE: {customer_filename}")
+            print(f"   ({len(customer_records)} new customer(s) with addresses)")
+        else:
+            print(f"No new customers found - all matched existing customers")
+
+        # Generate report
+        report_filename = filename.replace('.iif', '_NEW_CUSTOMERS.txt')
+        with open(report_filename, 'w', encoding='utf-8') as report:
+            report.write("=" * 70 + "\n")
+            report.write("NEW CUSTOMERS FROM SQUARESPACE\n")
+            report.write("=" * 70 + "\n\n")
+            report.write(f"New customers: {len(new_customers)}\n")
+            if customer_matcher:
+                report.write(f"Matched existing: {len(matched_customers)}\n")
+            report.write("\n" + "-" * 70 + "\n\n")
+
+            for i, cust_name in enumerate(sorted(new_customers), 1):
+                cust_info = customer_records.get(cust_name, {})
+                report.write(f"{i}. {cust_name}\n")
+                if cust_info.get('email'):
+                    report.write(f"   Email: {cust_info['email']}\n")
+                if cust_info.get('phone'):
+                    report.write(f"   Phone: {cust_info['phone']}\n")
+                report.write(f"   Bill To:\n")
+                if cust_info.get('addr1'):
+                    report.write(f"      {cust_info['addr1']}\n")
+                if cust_info.get('addr2'):
+                    report.write(f"      {cust_info['addr2']}\n")
+                if cust_info.get('addr3'):
+                    report.write(f"      {cust_info['addr3']}\n")
+                report.write(f"   Ship To:\n")
+                if cust_info.get('saddr1'):
+                    report.write(f"      {cust_info['saddr1']}\n")
+                if cust_info.get('saddr2'):
+                    report.write(f"      {cust_info['saddr2']}\n")
+                if cust_info.get('saddr3'):
+                    report.write(f"      {cust_info['saddr3']}\n")
+                report.write("\n")
+
+        print(f"REPORT: {report_filename}")
+        return
 
     # FILE 2: INVOICES ONLY
     invoice_filename = filename.replace('.iif', '_INVOICES.iif')
@@ -1676,6 +1811,7 @@ def main():
     if args.customers:
         customer_matcher = CustomerMatcher()
         customer_matcher.load_existing_customers(args.customers)
+        customer_matcher.load_customer_import_log()  # Load previously imported customers
         print()
     else:
         print("\nNOTE: No customer file provided")
@@ -1777,24 +1913,30 @@ def main():
             print("\nNote: Requires Commerce Advanced plan")
         return
 
-    # Generate output filename
+    # Generate output filename in output/squarespace/ directory
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     if args.output:
-        output_file = args.output
+        # If user provides full path, use as-is; otherwise put in OUTPUT_DIR
+        if os.path.dirname(args.output):
+            output_file = args.output
+        else:
+            output_file = os.path.join(OUTPUT_DIR, args.output)
     elif args.fulfilled_today:
         today = datetime.now().strftime('%Y-%m-%d')
-        output_file = f"squarespace_fulfilled_{today}.iif"
+        output_file = os.path.join(OUTPUT_DIR, f"squarespace_fulfilled_{today}.iif")
     elif args.order_numbers:
         # For specific orders, use order numbers in filename
         order_list = [num.strip() for num in args.order_numbers.split(',')]
         if len(order_list) == 1:
-            output_file = f"squarespace_invoice_{order_list[0]}.iif"
+            output_file = os.path.join(OUTPUT_DIR, f"squarespace_invoice_{order_list[0]}.iif")
         else:
-            output_file = f"squarespace_invoices_{len(orders)}_orders.iif"
+            output_file = os.path.join(OUTPUT_DIR, f"squarespace_invoices_{len(orders)}_orders.iif")
     else:
-        output_file = f"squarespace_invoices_{args.start_date}_to_{args.end_date}.iif"
+        output_file = os.path.join(OUTPUT_DIR, f"squarespace_invoices_{args.start_date}_to_{args.end_date}.iif")
 
     # Generate IIF file
-    generate_iif_file(orders, output_file, args.ar_account, args.income_account, customer_matcher, sku_mapper, args.use_ss_invoice_numbers, args.invoice_date)
+    generate_iif_file(orders, output_file, args.ar_account, args.income_account, customer_matcher, sku_mapper, args.use_ss_invoice_numbers, args.invoice_date, args.customers_only)
 
     # Email if requested
     if args.email:

@@ -1,359 +1,110 @@
-# TR-Automation-Scripts
+# Tannery Row Tools
 
-A collection of scripts used to automate processes at The Tannery Row LLC
+Internal automation toolbox for The Tannery Row LLC. A Streamlit-based dashboard providing tools for payment processing, order management, inventory tracking, and QuickBooks integration.
 
-## Setup
-
-### Prerequisites
-- Python 3.7 or higher
-- Required Python packages: `requests`, `stripe`
-
-### Installation
-```bash
-pip install requests stripe
-```
-
-### API Keys
-Set your API keys as environment variables:
-
-**Windows:**
-```cmd
-set SQUARESPACE_API_KEY=your-squarespace-api-key-here
-set STRIPE_API_KEY=sk_live_your_stripe_key_here
-set PAYPAL_CLIENT_ID=your_paypal_client_id
-set PAYPAL_CLIENT_SECRET=your_paypal_client_secret
-```
-
-**Mac/Linux:**
-```bash
-export SQUARESPACE_API_KEY=your-squarespace-api-key-here
-export STRIPE_API_KEY=sk_live_your_stripe_key_here
-export PAYPAL_CLIENT_ID=your_paypal_client_id
-export PAYPAL_CLIENT_SECRET=your_paypal_client_secret
-```
-
-## Pending Order Count Script
-
-**File:** `pending_order_count.py`
-
-This script connects to the Squarespace API to count panel and swatch book products from pending orders. It provides detailed breakdowns by product type, variant specifications, and SKUs.
-
-### Features
-- **SKU-based counting** for precise product identification
-- **Variant details** including sizes, weights, leather types (Dublin, Glove, etc.)
-- **Separate tracking** of panels and swatch books
-- **Detailed output** with product names, variant descriptions, and SKU references
-
-### Usage
+## Quick Start
 
 ```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the dashboard
+streamlit run app.py
+```
+
+Then open http://localhost:8501 in your browser.
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| **Payment Fetch** | Pull EOM billing reports from Stripe and PayPal |
+| **Order Payment Matcher** | Match Squarespace orders to payment transactions |
+| **Pending Order Count** | Count pending panel and swatch book orders |
+| **Mystery Bundle Counter** | Track mystery bundle inventory and orders |
+| **Leather Weight Calculator** | Calculate leather weight using calibrated coefficients |
+| **Swatch Book Generator** | Generate swatch book page layouts |
+| **Material Bank Leads** | Import Material Bank leads to Method CRM |
+
+## CLI Scripts
+
+Scripts can also be run directly from command line:
+
+```bash
+# Squarespace to QuickBooks import
+python scripts/squarespace_to_quickbooks.py --order-numbers 1001,1002,1003
+
+# Payment fetch with CSV export
+python scripts/payment_fetch.py --start-date 2025-01-01 --end-date 2025-01-31 --csv
+
+# Pending order count
 python scripts/pending_order_count.py
 ```
 
-### Example Output
+## Configuration
 
-```
-Panel counts:
-  Horween Dublin Leather Panels (Size: 2′ Panel - Weight: 3-4 oz) [SKU: SQ5172253]: 1
-Total panels: 1
+### Environment Variables
 
-Swatch book counts:
-  Horween Swatch Books (Swatch Book: Dublin) [SKU: SQ6839957]: 1
-  Horween Swatch Books (Swatch Book: Glove) [SKU: SQ0776396]: 1
-Total swatch books: 2
-```
-
-### Configuration
-- By default, fetches orders with "PENDING" fulfillment status
-- Modify the script to change fulfillment status or add date filters if needed
-
-## Migrate Sortly Inventory
-
-This script is a POC of how we can use LLM intelligence in order to differentiate between multi-worded colors and materials. Purposed to migrate the current sortly inventory to any other chosen platform once Shopify is migrated to.
-
-## Payment Fetch Script (EOM Billing Report)
-
-**File:** `payment_fetch.py`
-
-This script pulls transaction data from both Stripe and PayPal for end-of-month (EOM) billing reports. It provides comprehensive summaries with breakdowns by payment source and supports CSV export.
-
-### Features
-- **Multi-source support** - Fetches from Stripe and PayPal simultaneously
-- **Read-only operations** - Cannot create, modify, or delete transactions
-- **Detailed summaries** - Shows gross revenue, fees, net revenue, and fee rates
-- **CSV export** - Save data for further analysis
-- **Date range filtering** - Specify custom date ranges or use defaults
-
-### Prerequisites
-Set up your API keys as environment variables:
+Set these in your environment or `.streamlit/secrets.toml`:
 
 ```bash
-# Required for Stripe
-export STRIPE_API_KEY=sk_live_your_stripe_key_here
-
-# Required for PayPal
-export PAYPAL_CLIENT_ID=your_paypal_client_id
-export PAYPAL_CLIENT_SECRET=your_paypal_client_secret
-
-# Optional: Set to 'sandbox' for PayPal testing (defaults to 'live')
-export PAYPAL_MODE=live
+SQUARESPACE_API_KEY=your_key
+STRIPE_API_KEY=sk_live_xxx
+PAYPAL_CLIENT_ID=your_id
+PAYPAL_CLIENT_SECRET=your_secret
+PAYPAL_MODE=live
+SHIP_FROM_STATE=GA
 ```
 
-### Usage
+### Product Mapping
 
-```bash
-python scripts/payment_fetch.py [options]
-```
+Edit `config/sku_mapping.csv` to map Squarespace products to QuickBooks items:
 
-### Options
-
-```
---start-date START_DATE    Start date (YYYY-MM-DD). Default: 30 days ago
---end-date END_DATE        End date (YYYY-MM-DD). Default: today
---source {stripe,paypal,both}  Payment source to fetch. Default: both
---csv                      Export results to CSV file
-```
-
-### Example Usage
-
-```bash
-# Get last 30 days from both sources with CSV export
-python scripts/payment_fetch.py --csv
-
-# Get specific date range from Stripe only
-python scripts/payment_fetch.py --start-date 2024-01-01 --end-date 2024-01-31 --source stripe
-
-# Get PayPal transactions for last week
-python scripts/payment_fetch.py --start-date 2024-01-15 --source paypal
-```
-
-### Example Output
-
-```
-============================================================
-EOM BILLING SUMMARY
-============================================================
-
-Stripe:
-  Transactions: XX
-  Gross Revenue: $XXX.XX
-  Processing Fees: $XX.XX
-  Net Revenue: $XXX.XX
-  Fee Rate: X.XX%
-
-PayPal:
-  Transactions: XX
-  Gross Revenue: $XXX.XX
-  Processing Fees: $XX.XX
-  Net Revenue: $XXX.XX
-  Fee Rate: X.XX%
-
-==============================
-COMBINED TOTAL:
-  All Transactions: XX
-  Total Gross: $XXX.XX
-  Total Fees: $XX.XX
-  Total Net: $XXX.XX
-  Overall Fee Rate: X.XX%
-```
-
-### Troubleshooting
-- **PayPal 403 Error**: Transaction Search API may be disabled. Call PayPal support at 1-888-221-1161 to enable
-- **Missing transactions**: Verify API keys are set correctly
-- **Date format**: Use YYYY-MM-DD format for dates
-
-## Squarespace to QuickBooks Integration
-
-**File:** `scripts/squarespace_to_quickbooks.py`
-
-Automatically import Squarespace orders as QuickBooks Desktop invoices with product mapping, customer matching, and location-based tax calculation.
-
-### What It Does
-
-✅ Fetches orders from Squarespace (single, multiple, or batch)
-✅ **Maps products by name** to QuickBooks items (no SKUs needed!)
-✅ **NEW: Variant mapping** - Maps products with attributes (tannage, color, weight)
-✅ **Extracts pieces** from order customizations/variants
-✅ **Captures all fields**: Item, Description, Quantity, Pieces, Price
-✅ **Location-based tax** (in-state vs out-of-state)
-✅ Smart customer matching (email/phone/name) to avoid duplicates
-✅ Auto-creates new customers with full contact info
-✅ Flags new customers in separate report
-✅ **REP = "SHOP"** and **SHIP VIA = "UPS"** (hardcoded)
-✅ **Flexible invoice numbering** - blank (default) or use Squarespace order numbers
-✅ **Daily automation** - saves to RDP or emails files
-
-### Quick Start
-
-**1. Set Environment Variables:**
-```cmd
-set SQUARESPACE_API_KEY=your_api_key_here
-set SHIP_FROM_STATE=GA
-```
-
-**2. Create Product Mapping** (optional - edit `sku_mapping.csv`):
 ```csv
 SquarespaceProductName,QuickBooksItem
 Horween Dublin Leather Panels,Premium Leather Hide
-Brass Hardware Set,Brass Buckle Set
 Leather Panel - Horween Predator - Steel - 5-6 oz,Predator Steel 5-6 oz
-Leather Panel - Italian Nubuck - French Navy - 3.5-4 oz,Italian Nubuck French Navy
-```
-**Note:** Supports both simple product mappings and variant-specific mappings (tannage, color, weight)
-
-**3. Run Import:**
-```cmd
-# Orders fulfilled today
-python scripts\squarespace_to_quickbooks.py --fulfilled-today
-
-# Specific order(s)
-python scripts\squarespace_to_quickbooks.py --order-numbers 1001
-python scripts\squarespace_to_quickbooks.py --order-numbers 1001,1002,1003
-
-# Date range
-python scripts\squarespace_to_quickbooks.py --start-date 2025-01-01 --end-date 2025-01-31
-
-# OPTIONAL: Use Squarespace order numbers as QB invoice numbers with "SS-" prefix (instead of blank)
-python scripts\squarespace_to_quickbooks.py --fulfilled-today --use-ss-invoice-numbers
 ```
 
-**4. Import to QuickBooks:**
-- File > Utilities > Import > IIF Files
-- Select the generated `.iif` file (customers first, then invoices)
-- Invoices will import with BLANK invoice numbers (unless you used `--use-ss-invoice-numbers`)
+## Project Structure
 
-**5. Assign Invoice Numbers:**
-- **Default (blank):** In QuickBooks, find invoices with blank numbers and manually assign sequential invoice numbers
-- **Optional:** Use `--use-ss-invoice-numbers` flag to automatically use Squarespace order numbers
-- **Why blank is default?** Prevents conflicts in multi-user RDP environments where concurrent imports could override invoice numbers
-
-### Key Features
-
-- **Product Name Mapping**: Map Squarespace products to QB items (no SKU required)
-- **Variant Mapping**: Map products with multiple attributes (tannage, color, weight) to specific QB items
-- **Unmapped Products Tracking**: Auto-generates report of products without mappings
-- **Pieces Extraction**: From customizations/variants in Squarespace API
-- **Location-Based Tax**: Compare ship-to vs ship-from state
-- **Customer Matching**: Smart duplicate detection by email/phone/name
-- **Flexible Invoice Numbering**: Blank by default (manual), or use Squarespace order numbers with `--use-ss-invoice-numbers`
-- **Daily Automation**: Auto-generate IIF files for fulfilled orders
-- **Flexible Import**: Single, multiple, or batch by date range
-- **REP & SHIP VIA**: Automatically set to "SHOP" and "UPS"
-
-### Field Mapping
-
-| QuickBooks | Squarespace | Notes |
-|------------|-------------|-------|
-| Date | `createdOn` | Invoice date |
-| Invoice # | *(blank or SS-####)* | Blank by default, or "SS-1001" format with `--use-ss-invoice-numbers` |
-| Customer | `billingAddress` | Smart duplicate detection |
-| Ship To | `shippingAddress` | Full address |
-| Ship Date | `fulfilledOn` | Fulfillment date |
-| Ship Via | *(hardcoded)* | Always "UPS" |
-| REP | *(hardcoded)* | Always "SHOP" |
-| Item | `productName` → mapped | Via `sku_mapping.csv` |
-| Description | `productName` + `variantOptions` | Full description |
-| Quantity | `quantity` | Normal integers |
-| Pieces | `customizations` or `variantOptions` | Extracted from API |
-| Price | `unitPricePaid.value` | Unit price |
-| Taxable | Ship-to vs Ship-from state | Y/N based on location |
-
-### Generated Reports
-
-After each import, the script generates helpful reports:
-
-📄 **`*_NEW_CUSTOMERS.txt`** (always generated)
-- Lists all new customers that will be created in QuickBooks
-- Includes contact info for verification
-
-📄 **`*_UNMAPPED_PRODUCTS.txt`** (if any unmapped products found)
-- Lists products without mappings in `sku_mapping.csv`
-- Shows what QB item names will be auto-created
-- Provides suggested mapping entries to add
-- **⚠️ Review this before importing to avoid unwanted QB items!**
-
-### Invoice Numbering Workflow
-
-**Invoice Numbering Options:**
-
-**Option 1: Blank Invoice Numbers (Default - Recommended)**
-- Invoices import with blank invoice numbers
-- You manually assign sequential numbers after import
-- **Benefits:**
-  - Prevents conflicts in multi-user RDP environments
-  - Gives you full control over sequential numbering
-  - No risk of overriding existing QB invoice numbers
-
-**Option 2: Use Squarespace Order Numbers (Optional)**
-- Add `--use-ss-invoice-numbers` flag when running the script
-- Uses Squarespace order numbers with "SS-" prefix (e.g., "SS-1001", "SS-1002") as QB invoice numbers
-- **Benefits:**
-  - Automatic - no manual numbering needed
-  - Perfect traceability between Squarespace and QuickBooks
-  - Prefix prevents conflicts with existing QB invoice numbers
-- **Trade-offs:**
-  - Non-sequential in QuickBooks (gaps based on which orders you import)
-  - Different numbering format than your regular QB invoices
-
-**How to batch-number invoices after import:**
-
-1. **Find blank invoices:**
-   - In QuickBooks Desktop, go to: Reports > Banking > Missing Checks
-   - Change account to: Accounts Receivable
-   - This shows all invoice numbers (or blanks) in your A/R account
-
-2. **Assign numbers:**
-   - Open each invoice with a blank number
-   - Type your desired invoice number (e.g., next sequential number)
-   - Click Save & Close
-   - QuickBooks will continue the sequence for future invoices
-
-3. **Alternative - Batch edit:**
-   - Sort invoices by date or customer
-   - Number them sequentially in one session
-   - Maintains proper audit trail
-
-**💡 Tip:** Import all Squarespace invoices in one batch, then number them all at once for efficiency.
-
-### Action Items
-
-**Required:**
-- [ ] Get Squarespace API key (Settings > Advanced > Developer API Keys)
-- [ ] Set `SQUARESPACE_API_KEY` and `SHIP_FROM_STATE` environment variables
-- [ ] Create `sku_mapping.csv` with your product mappings
-- [ ] Test with one order: `python squarespace_to_quickbooks.py --order-numbers 1001`
-- [ ] **Review `_UNMAPPED_PRODUCTS.txt` report (if generated)**
-- [ ] Import to QuickBooks (customers first, then invoices)
-- [ ] **Manually assign invoice numbers** (see Invoice Numbering Workflow above)
-
-**Optional:**
-- [ ] Export QB customer list for smart duplicate detection
-- [ ] Set up daily automation (email or RDP upload)
-- [ ] Configure Windows Task Scheduler for daily imports
-
-### Documentation
-
-See these files for complete documentation:
-- `docs/PRODUCT_MAPPING_GUIDE.md` - How to map products by name (no SKU!)
-- `docs/FIELDS_CAPTURED.md` - Complete field mapping details
-- `docs/SALES_TAX_LOGIC.md` - Location-based tax rules
-- `docs/RDP_QUICK_START.md` - 5-minute daily automation setup
-- `docs/DAILY_AUTOMATION_SETUP.md` - Email automation guide
-
-### Daily Automation
-
-**Option 1: RDP Upload (Recommended)**
-```cmd
-# Edit daily_automation_rdp.bat, set your RDP path, then schedule in Task Scheduler
-daily_automation_rdp.bat
+```
+TR-Automation-Scripts/
+├── app.py                 # Streamlit dashboard (main entry point)
+├── requirements.txt       # Python dependencies
+├── scripts/               # Core automation scripts
+├── utils/                 # Shared utilities (auth, storage)
+├── config/                # Configuration files
+├── docs/                  # Documentation
+├── output/                # Generated files (gitignored)
+└── examples/              # Reference files
 ```
 
-**Option 2: Email**
-```cmd
-# Set email environment variables, then schedule in Task Scheduler
-set EMAIL_USER=your_email@gmail.com
-set EMAIL_PASSWORD=your_app_password
-python scripts\squarespace_to_quickbooks.py --fulfilled-today --email matt@thetanneryrow.com
+## Deployment
+
+### Streamlit Cloud
+
+1. Push to GitHub
+2. Connect repo at share.streamlit.io
+3. Configure secrets in dashboard settings
+4. See `docs/STREAMLIT_CLOUD_SETUP.md` for full guide
+
+### Cloudflare Tunnel (Local Network)
+
+For local network access via Cloudflare:
+
+```bash
+# Install cloudflared
+# Run dashboard on local network
+streamlit run app.py --server.address 0.0.0.0 --server.port 8501
+
+# Create tunnel
+cloudflared tunnel --url http://localhost:8501
 ```
 
-See `RDP_QUICK_START.md` or `DAILY_AUTOMATION_SETUP.md` for setup instructions.
+## Documentation
+
+- `docs/DEPLOY_CHECKLIST.md` - Quick deployment reference
+- `docs/STREAMLIT_CLOUD_SETUP.md` - Cloud deployment guide
+- `docs/PRODUCT_MAPPING_GUIDE.md` - SKU mapping setup
+- `docs/QUICK_REFERENCE.md` - Command quick reference

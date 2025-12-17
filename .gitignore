@@ -1,70 +1,112 @@
-# Examples folder (reference files only, except essential config files)
+# =============================================================================
+# OUTPUT FILES - All generated outputs are ignored
+# =============================================================================
+
+# Output directory (all script outputs go here)
+output/
+
+# Legacy output files in root (should be moved to output/)
+*.iif
+*_NEW_CUSTOMERS.txt
+*_UNMAPPED_PRODUCTS.txt
+*_ENCRYPTED.zip
+eom_billing_*.csv
+QB_*.csv
+swatch_book_pages_*/
+swatch_book_reference_*.txt
+swatch_book_complete.txt
+
+# =============================================================================
+# CONFIG FILES - Local configuration (contains sensitive data or local paths)
+# =============================================================================
+
+# Import tracking logs (local state)
+config/import_log.csv
+config/customer_import_log.csv
+config/missing_inventory.csv
+
+# Leather weight coefficients (local calibration data)
+config/leather_weight_coefficients.csv
+
+# Gmail OAuth credentials (NEVER commit!)
+config/gmail_credentials.json
+config/gmail_token.json
+config/gmail_token.pickle
+
+# =============================================================================
+# EXAMPLES FOLDER - Reference files only
+# =============================================================================
+
+# Ignore examples folder except essential reference files
 examples/
 !examples/holiday_sale_mappings.csv
 !examples/customers_backup.csv
 !examples/Holiday Product Mappings 2025.txt
 
-# Output folder
-output/
+# =============================================================================
+# STREAMLIT - Secrets and OAuth
+# =============================================================================
 
-# IDE files
-.idea/
-*.iml
+.streamlit/secrets.toml
+.streamlit/google_oauth_credentials.json
 
-# Python cache
+# =============================================================================
+# EXTERNAL DATA - Material Bank / Method CRM
+# =============================================================================
+
+# Entire development folder (contains PII and dev artifacts)
+MethodMaterialBankThreadRipper/
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+*.so
+.eggs/
+*.egg-info/
+*.egg
 
-# Environment files
+# Virtual environments
 .env
 .venv
 env/
 venv/
+ENV/
 
-# OS generated files
+# =============================================================================
+# IDE / EDITOR
+# =============================================================================
+
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# =============================================================================
+# OS GENERATED
+# =============================================================================
+
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# =============================================================================
+# MISC / TEMP
+# =============================================================================
+
+# Windows reserved names that accidentally got created
+nul
+=1.3.2
 
 # Claude Code settings
 .claude/
 
-# Customer data and import tracking (local only, not committed)
-data/customers.csv
-config/import_log.csv
-config/missing_inventory.csv
-config/leather_weight_coefficients.csv
-
-# Generated IIF files
-*.iif
-*_NEW_CUSTOMERS.txt
-*_UNMAPPED_PRODUCTS.txt
-*_ENCRYPTED.zip
-
-# Generated output files
-swatch_book_pages_*/
-swatch_book_reference_*.txt
-swatch_book_complete.txt
-eom_billing_*.csv
-QB_*.csv
-
-# Gmail OAuth credentials (NEVER commit these!)
-config/gmail_credentials.json
-config/gmail_token.json
-
-# Streamlit secrets (NEVER commit!)
-.streamlit/secrets.toml
-.streamlit/google_oauth_credentials.json
-
-# Material Bank / Method CRM data files (contain PII)
-MethodMaterialBankThreadRipper/*.csv
-MethodMaterialBankThreadRipper/*.xlsx
-MethodMaterialBankThreadRipper/.env
-
-# Temp/junk files
-nul
-=1.3.2
-output_test
-
-# Squarespace invoice exports
-squarespace_invoices_*
+# Test outputs
+output_test/
