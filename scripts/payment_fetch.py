@@ -151,6 +151,8 @@ def fetch_paypal_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
     READ-ONLY: Fetches existing PayPal transactions
     Uses only GET requests to /v1/reporting/transactions
     CANNOT create, modify, or delete anything
+
+    Note: PayPal API has 31-day limit per request, so we chunk large ranges
     """
     token = get_paypal_readonly_token()
     if not token:
@@ -166,79 +168,97 @@ def fetch_paypal_readonly(start_date: str, end_date: str) -> List[Dict[str, Any]
         'Content-Type': 'application/json'
     }
 
-    transactions = []
+    # PayPal has 31-day limit - chunk large date ranges
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
 
-    # READ-ONLY API call - only GET request to read transactions
-    params = {
-        'start_date': f"{start_date}T00:00:00.000Z",
-        'end_date': f"{end_date}T23:59:59.999Z",
-        'fields': 'all',
-        'page_size': 100,
-        'page': 1
-    }
+    all_transactions = []
+    chunk_start = start_dt
 
-    try:
-        # READ-ONLY: GET request only reads data
-        response = requests.get(  # GET = READ-ONLY
-            f'{base_url}/v1/reporting/transactions',
-            headers=headers,
-            params=params
-        )
+    while chunk_start < end_dt:
+        chunk_end = min(chunk_start + timedelta(days=30), end_dt)
+        chunk_start_str = chunk_start.strftime('%Y-%m-%d')
+        chunk_end_str = chunk_end.strftime('%Y-%m-%d')
 
-        if response.status_code == 403:
-            print("\nWARNING: PayPal Transaction Search is disabled.")
-            print("   To enable: Call PayPal Support at 1-888-221-1161")
-            print("   Ask them to enable 'Transaction Search API'")
-            print("\n   Alternative: Download CSV from PayPal Dashboard:")
-            print("   Activity -> Statements -> Activity download")
-            return []
+        page = 1
+        total_pages = 1
 
-        response.raise_for_status()
-        data = response.json()
+        try:
+            while page <= total_pages:
+                params = {
+                    'start_date': f"{chunk_start_str}T00:00:00.000Z",
+                    'end_date': f"{chunk_end_str}T23:59:59.999Z",
+                    'fields': 'all',
+                    'page_size': 100,
+                    'page': page
+                }
 
-        for txn in data.get('transaction_details', []):
-            info = txn.get('transaction_info', {})
+                response = requests.get(
+                    f'{base_url}/v1/reporting/transactions',
+                    headers=headers,
+                    params=params
+                )
 
-            # Skip non-successful
-            if info.get('transaction_status') not in ['S', 'Completed']:
-                continue
+                if response.status_code == 403:
+                    print("\nWARNING: PayPal Transaction Search is disabled.")
+                    print("   To enable: Call PayPal Support at 1-888-221-1161")
+                    print("   Ask them to enable 'Transaction Search API'")
+                    return []
 
-            gross = abs(float(info.get('transaction_amount', {}).get('value', 0)))
-            fee = abs(float(info.get('fee_amount', {}).get('value', 0)))
-            net = gross - fee
+                response.raise_for_status()
+                data = response.json()
 
-            payer = txn.get('payer_info', {})
-            name_info = payer.get('payer_name', {})
-            name = f"{name_info.get('given_name', '')} {name_info.get('surname', '')}".strip()
+                if page == 1:
+                    total_pages = data.get('total_pages', 1)
 
-            # Try transaction_initiated_date first, fall back to transaction_updated_date
-            date_str = info.get('transaction_initiated_date', '') or info.get('transaction_updated_date', '')
-            if date_str:
-                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                formatted_date = dt.strftime('%Y-%m-%d')
-                sort_datetime = dt.isoformat()
-            else:
-                formatted_date = start_date
-                sort_datetime = f"{start_date}T00:00:00+00:00"
+                for txn in data.get('transaction_details', []):
+                    info = txn.get('transaction_info', {})
 
-            transactions.append({
-                'date': formatted_date,
-                'sort_datetime': sort_datetime,
-                'customer_name': name or 'N/A',
-                'customer_email': payer.get('email_address', 'N/A'),
-                'gross_amount': gross,
-                'processing_fee': fee,
-                'net_amount': net,
-                'source': 'PayPal',
-                'transaction_id': info.get('transaction_id', 'N/A')
-            })
+                    if info.get('transaction_status') not in ['S', 'Completed']:
+                        continue
 
-        print(f"  Found {len(transactions)} PayPal transactions")
+                    gross = abs(float(info.get('transaction_amount', {}).get('value', 0)))
+                    fee = abs(float(info.get('fee_amount', {}).get('value', 0)))
+                    net = gross - fee
 
-    except requests.RequestException as e:
-        print(f"Error reading PayPal data: {e}")
+                    payer = txn.get('payer_info', {})
+                    name_info = payer.get('payer_name', {})
+                    name = f"{name_info.get('given_name', '')} {name_info.get('surname', '')}".strip()
 
-    return transactions
+                    # PayPal changes field names randomly - check all known variants
+                    date_str = (info.get('transaction_initiation_date', '') or
+                               info.get('transaction_initiated_date', '') or
+                               info.get('transaction_updated_date', '') or
+                               info.get('create_time', ''))
+                    if date_str:
+                        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        formatted_date = dt.strftime('%Y-%m-%d')
+                        sort_datetime = dt.isoformat()
+                    else:
+                        formatted_date = chunk_start_str
+                        sort_datetime = f"{chunk_start_str}T00:00:00+00:00"
+
+                    all_transactions.append({
+                        'date': formatted_date,
+                        'sort_datetime': sort_datetime,
+                        'customer_name': name or 'N/A',
+                        'customer_email': payer.get('email_address', 'N/A'),
+                        'gross_amount': gross,
+                        'processing_fee': fee,
+                        'net_amount': net,
+                        'source': 'PayPal',
+                        'transaction_id': info.get('transaction_id', 'N/A')
+                    })
+
+                page += 1
+
+        except requests.RequestException as e:
+            print(f"Error reading PayPal data for {chunk_start_str} to {chunk_end_str}: {e}")
+
+        chunk_start = chunk_end
+
+    print(f"  Found {len(all_transactions)} PayPal transactions")
+    return all_transactions
 
 
 def display_summary(transactions: List[Dict[str, Any]]) -> None:

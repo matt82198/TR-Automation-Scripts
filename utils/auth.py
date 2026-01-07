@@ -12,6 +12,9 @@ import streamlit as st
 from typing import Optional, List
 import os
 
+# Allow OAuth scope changes (Google sometimes adds scopes)
+os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = 'true'
+
 # Default authorized domain - employees with this domain get access
 AUTHORIZED_DOMAIN = "@thetanneryrow.com"
 

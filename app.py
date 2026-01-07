@@ -35,6 +35,14 @@ from payment_fetch import fetch_stripe_readonly, fetch_paypal_readonly
 from order_payment_matcher import match_order_batch
 
 # =============================================================================
+# Prevent search engine indexing (internal tool only)
+# =============================================================================
+st.markdown(
+    '<meta name="robots" content="noindex, nofollow">',
+    unsafe_allow_html=True
+)
+
+# =============================================================================
 # Tool Configuration
 # =============================================================================
 
@@ -174,9 +182,8 @@ def get_available_tools():
 # =============================================================================
 # Authentication Check
 # =============================================================================
-# Disabled for local network access - uncomment to re-enable
-# if not check_authentication():
-#     st.stop()
+if not check_authentication():
+    st.stop()
 
 # =============================================================================
 # Page Configuration
@@ -470,7 +477,10 @@ elif tool == "Order Payment Matcher":
                         # Generate CSV for download
                         csv_lines = ["Order Number,Date,Customer,Email,Payment Source,Gross,Net,Fee,Write-off,Matched"]
                         for r in results:
-                            csv_lines.append(f"{r['order_number']},{r['order_date']},{r['customer_name']},{r['customer_email']},{r['payment_source']},{r['gross_amount']:.2f},{r['net_amount']:.2f},{r['processing_fee']:.2f},{r['write_off']:.2f},{r['matched']}")
+                            net = f"{r['net_amount']:.2f}" if r['net_amount'] is not None else ""
+                            fee = f"{r['processing_fee']:.2f}" if r['processing_fee'] is not None else ""
+                            writeoff = f"{r['write_off']:.2f}" if r['write_off'] is not None else ""
+                            csv_lines.append(f"{r['order_number']},{r['order_date']},{r['customer_name']},{r['customer_email']},{r['payment_source']},{r['gross_amount']:.2f},{net},{fee},{writeoff},{r['matched']}")
 
                         csv_content = "\n".join(csv_lines)
                         st.download_button(
