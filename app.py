@@ -1056,12 +1056,14 @@ elif tool == "Material Bank Leads":
                 # Show results
                 st.subheader("Import Results")
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("Leads Processed", results['leads_processed'])
                 with col2:
                     st.metric("Activities Created", results['activities_created'])
                 with col3:
+                    st.metric("Existing Updated", results.get('existing_updated', 0))
+                with col4:
                     st.metric("Follow-ups Created", results['followups_created'])
 
                 if results['errors']:
@@ -1073,7 +1075,8 @@ elif tool == "Material Bank Leads":
                 if results['details']:
                     with st.expander("Import Details", expanded=True):
                         for detail in results['details']:
-                            st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']}")
+                            status = "existing" if detail.get('is_existing') else "new"
+                            st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']} [{status}]")
 
                     # Log the import
                     log_import(results['details'], results['activities_created'])

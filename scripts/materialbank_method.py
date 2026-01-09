@@ -157,8 +157,9 @@ def create_activity(contact_name, contact_email, company, samples, project_info,
     r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=activity_data)
 
     if r.status_code == 201:
-        return int(r.text)
-    return None
+        return int(r.text), None
+    # Return error for logging
+    return None, f"API {r.status_code}: {r.text[:200]}"
 
 
 def create_followup_activity(parent_activity_id, contact_name, contact_email, contacts_record_id, days_out=7):
@@ -181,13 +182,16 @@ def create_followup_activity(parent_activity_id, contact_name, contact_email, co
     r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=followup_data)
 
     if r.status_code == 201:
-        return int(r.text)
-    return None
+        return int(r.text), None
+    return None, f"API {r.status_code}: {r.text[:200]}"
 
 
 def process_materialbank_import(mb_df, existing_contacts=None, progress_callback=None):
     """
     Full pipeline: Convert MB data, create activities, and follow-ups.
+
+    Creates MB Samples activities for ALL leads (including existing contacts).
+    Only creates Intro EMAIL follow-up for NEW contacts.
 
     Args:
         mb_df: Material Bank DataFrame
@@ -201,6 +205,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         'leads_processed': 0,
         'activities_created': 0,
         'followups_created': 0,
+        'existing_updated': 0,
         'errors': [],
         'details': []
     }
@@ -216,32 +221,36 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
 
     existing_emails = set(existing_contacts.keys())
 
-    # Convert to Method format and get unique leads
+    # Convert to Method format for stats (this filters to new leads only for CSV export)
     update_progress("Processing Material Bank data...", 10)
     method_df, stats = convert_materialbank_to_method(mb_df, existing_emails)
     results['conversion_stats'] = stats
 
-    if len(method_df) == 0:
-        results['errors'].append("No new leads to import (all already exist)")
+    # Process ALL leads for MB Samples (not just new ones)
+    mb_df = mb_df.copy()
+    mb_df['Order Date'] = pd.to_datetime(mb_df['Order Date'], format='%m/%d/%Y')
+    mb_df['Email_Lower'] = mb_df['Email'].str.lower()
+
+    # Get unique emails
+    unique_emails = mb_df['Email_Lower'].unique()
+    total_leads = len(unique_emails)
+
+    if total_leads == 0:
+        results['errors'].append("No leads to process")
         return results
 
-    # Group MB data by email to get samples per lead
-    mb_df['Email_Lower'] = mb_df['Email'].str.lower()
-    new_emails = set(method_df['Email'].str.lower())
-    mb_filtered = mb_df[mb_df['Email_Lower'].isin(new_emails)]
-
-    total_leads = len(method_df)
-
-    for idx, (email, group) in enumerate(mb_filtered.groupby('Email_Lower')):
+    for idx, email in enumerate(unique_emails):
         pct = 20 + int(70 * idx / total_leads)
 
+        group = mb_df[mb_df['Email_Lower'] == email]
         lead_row = group.iloc[0]
         contact_name = f"{lead_row['First Name']} {lead_row['Last Name']}"
         company = lead_row['Company']
+        is_existing = email in existing_emails
 
-        update_progress(f"Processing {contact_name}...", pct)
+        update_progress(f"Processing {contact_name} ({'existing' if is_existing else 'new'})...", pct)
 
-        # Collect samples
+        # Collect all samples for this lead
         samples = []
         for _, row in group.iterrows():
             sample = f"{row['Name']} {row['Color']}".strip()
@@ -262,8 +271,8 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         if email in existing_contacts:
             contacts_record_id = existing_contacts[email]['RecordID']
 
-        # Create activity
-        activity_id = create_activity(
+        # Create MB Samples activity for ALL leads
+        activity_id, error = create_activity(
             contact_name=contact_name,
             contact_email=email,
             company=company,
@@ -275,10 +284,12 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
 
         if activity_id:
             results['activities_created'] += 1
+            if is_existing:
+                results['existing_updated'] += 1
 
-            # Create follow-up if we have the contact
+            # Always create follow-up (parallel workflows allowed for new sample orders)
             if contacts_record_id:
-                followup_id = create_followup_activity(
+                followup_id, followup_error = create_followup_activity(
                     parent_activity_id=activity_id,
                     contact_name=contact_name,
                     contact_email=email,
@@ -286,16 +297,19 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
                 )
                 if followup_id:
                     results['followups_created'] += 1
+                elif followup_error:
+                    results['errors'].append(f"Follow-up failed for {contact_name}: {followup_error}")
 
             results['details'].append({
                 'name': contact_name,
                 'email': email,
                 'company': company,
                 'samples': len(samples),
-                'activity_id': activity_id
+                'activity_id': activity_id,
+                'is_existing': is_existing
             })
         else:
-            results['errors'].append(f"Failed to create activity for {contact_name}")
+            results['errors'].append(f"Activity failed for {contact_name}: {error}")
 
         results['leads_processed'] += 1
         time.sleep(0.3)  # Rate limiting
