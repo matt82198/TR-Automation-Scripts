@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  streamlit:
+    build: .
+    container_name: tr-tools-app
+    restart: unless-stopped
+    volumes:
+      - ./.streamlit:/app/.streamlit:ro
+      - ./config:/app/config
+      - ./output:/app/output
+      - ./examples:/app/examples:ro
+    environment:
+      - TZ=America/New_York
+    networks:
+      - tr-network
+    # Uncomment below for direct access (debugging)
+    # ports:
+    #   - "8501:8501"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: tr-tools-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - tr-network
+    depends_on:
+      - streamlit
+
+networks:
+  tr-network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local files
+*.log
+*.tmp
+
+# Secrets (will be mounted separately)
+.streamlit/secrets.toml
+
+# Output files (will be mounted as volume)
+output/
+
+# Test files
+tests/
+*.bat
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Backup files
+*.bak
+*.backup

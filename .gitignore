@@ -22,8 +22,16 @@ swatch_book_complete.txt
 
 # Import tracking logs (local state)
 config/import_log.csv
+config/import_log.csv.bak
 config/customer_import_log.csv
+config/materialbank_import_log.csv
 config/missing_inventory.csv
+
+# Data directory (runtime data)
+data/
+
+# Temp files
+temp_*.json
 
 # Leather weight coefficients (local calibration data)
 config/leather_weight_coefficients.csv
