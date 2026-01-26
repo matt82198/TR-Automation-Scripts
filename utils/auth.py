@@ -84,10 +84,31 @@ def get_local_authenticator():
     if 'authenticator' not in st.session_state:
         try:
             from pathlib import Path
+            import json
+            import tempfile
+
             auth_config = st.secrets.get('auth', {})
 
             # Path to credentials file
             creds_path = Path(__file__).parent.parent / '.streamlit' / 'google_oauth_credentials.json'
+
+            # If credentials file doesn't exist (Streamlit Cloud), create from secrets
+            if not creds_path.exists():
+                # Create credentials JSON from secrets
+                creds_data = {
+                    "web": {
+                        "client_id": auth_config.get('client_id', ''),
+                        "client_secret": auth_config.get('client_secret', ''),
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": [auth_config.get('redirect_uri', 'http://localhost:8501')]
+                    }
+                }
+                # Write to temp file
+                temp_creds = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+                json.dump(creds_data, temp_creds)
+                temp_creds.close()
+                creds_path = temp_creds.name
 
             st.session_state.authenticator = Authenticate(
                 secret_credentials_path=str(creds_path),
