@@ -86,7 +86,7 @@ def convert_materialbank_to_method(df, existing_emails=None):
 
     # Parse and sort by Order Date
     df = df.copy()
-    df['Order Date'] = pd.to_datetime(df['Order Date'], format='%m/%d/%Y')
+    df['Order Date'] = pd.to_datetime(df['Order Date'], format='mixed', dayfirst=False)
     df = df.sort_values('Order Date', ascending=True)
 
     # Deduplicate by email + company (first order wins for contact info)
@@ -228,7 +228,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
 
     # Process ALL leads for MB Samples (not just new ones)
     mb_df = mb_df.copy()
-    mb_df['Order Date'] = pd.to_datetime(mb_df['Order Date'], format='%m/%d/%Y')
+    mb_df['Order Date'] = pd.to_datetime(mb_df['Order Date'], format='mixed', dayfirst=False)
     mb_df['Email_Lower'] = mb_df['Email'].str.lower()
 
     # Get unique emails

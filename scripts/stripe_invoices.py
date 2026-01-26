@@ -328,8 +328,8 @@ def export_to_csv(transaction_data: List[Dict[str, Any]], start_date: str, end_d
                 f"{data['net']:.2f}"
             ])
 
-    print(f"\n✓ Transaction details exported to {filename}")
-    print(f"✓ Customer summary exported to {summary_filename}")
+    print(f"\n[OK] Transaction details exported to {filename}")
+    print(f"[OK] Customer summary exported to {summary_filename}")
 
 
 def main():

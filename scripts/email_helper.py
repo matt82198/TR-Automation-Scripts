@@ -99,7 +99,7 @@ This is an automated report from Squarespace to QuickBooks integration.
         server.send_message(msg)
         server.quit()
 
-        print(f"✓ Email sent successfully to {recipient}")
+        print(f"[OK] Email sent successfully to {recipient}")
         return True
 
     except Exception as e:
