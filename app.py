@@ -221,36 +221,54 @@ available_tools = get_available_tools()
 
 st.sidebar.title("Navigation")
 
-# Build collapsible category navigation
 if not available_tools:
     st.error("No tools available for your access level.")
     st.stop()
 
-# Build flat list of tools with category info for radio
-tool_options = []
-tool_descriptions = {}
+# Build tool list and lookup
+all_tools = []
+tool_to_info = {}
 for category, cat_data in available_tools.items():
     for tool_name, tool_data in cat_data["tools"].items():
-        display_name = f"{cat_data['icon']} {tool_name}"
-        tool_options.append(display_name)
-        tool_descriptions[display_name] = {
-            "name": tool_name,
+        all_tools.append(tool_name)
+        tool_to_info[tool_name] = {
             "category": category,
+            "icon": cat_data["icon"],
             "description": tool_data["description"]
         }
 
-# Radio selection
-selected_display = st.sidebar.radio(
-    "Select Tool",
-    tool_options,
-    label_visibility="collapsed"
-)
+# Initialize selected tool
+if 'selected_tool' not in st.session_state or st.session_state.selected_tool not in all_tools:
+    st.session_state.selected_tool = all_tools[0]
 
-# Get actual tool name from selection
-tool = tool_descriptions[selected_display]["name"]
+# Collapsible categories with radio-style selection
+for category, cat_data in available_tools.items():
+    with st.sidebar.expander(f"{cat_data['icon']} {category}", expanded=True):
+        tool_names = list(cat_data["tools"].keys())
 
-# Show description
-st.sidebar.caption(tool_descriptions[selected_display]["description"])
+        # Check if current selection is in this category
+        current_in_category = st.session_state.selected_tool in tool_names
+        default_idx = tool_names.index(st.session_state.selected_tool) if current_in_category else None
+
+        selected = st.radio(
+            f"Select from {category}",
+            tool_names,
+            index=default_idx if default_idx is not None else 0,
+            key=f"radio_{category}",
+            label_visibility="collapsed"
+        )
+
+        # Update selection if user picked from this category
+        if selected and selected != st.session_state.selected_tool and current_in_category is False:
+            st.session_state.selected_tool = selected
+        elif selected and current_in_category:
+            st.session_state.selected_tool = selected
+
+        # Show description for selected tool in this category
+        if selected in cat_data["tools"]:
+            st.caption(cat_data["tools"][selected]["description"])
+
+tool = st.session_state.selected_tool
 
 # Show user info in sidebar
 show_user_info_sidebar()
