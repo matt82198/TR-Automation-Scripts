@@ -27,7 +27,7 @@ from auth import check_authentication, show_user_info_sidebar, get_secret
 from gsheets_storage import (
     load_missing_inventory, save_missing_inventory,
     load_coefficients, save_coefficients,
-    is_cloud_deployment
+    is_cloud_deployment, log_activity
 )
 
 from pending_order_count import SquarespacePanelCalculator
@@ -323,11 +323,14 @@ if tool == "Payment Fetch":
         )
 
     if st.button("Fetch Payments", type="primary"):
+        user_email = st.session_state.get("user_email", "local")
         with st.spinner("Fetching payment data..."):
             try:
                 # Fetch directly using the imported functions
                 start_str = start_date.strftime("%Y-%m-%d")
                 end_str = end_date.strftime("%Y-%m-%d")
+
+                log_activity(user_email, "Payment Fetch", "fetch", f"{start_str} to {end_str}")
 
                 stripe_txns = fetch_stripe_readonly(start_str, end_str)
                 paypal_txns = fetch_paypal_readonly(start_str, end_str)
@@ -443,6 +446,9 @@ elif tool == "Order Payment Matcher":
                         start_str = start_date.strftime("%Y-%m-%d")
                         end_str = end_date.strftime("%Y-%m-%d")
 
+                        user_email = st.session_state.get("user_email", "local")
+                        log_activity(user_email, "Order Payment Matcher", "match", f"{len(order_numbers)} orders")
+
                         stripe_txns = fetch_stripe_readonly(start_str, end_str)
                         paypal_txns = fetch_paypal_readonly(start_str, end_str)
 
@@ -548,6 +554,9 @@ elif tool == "Pending Order Count":
         else:
             with st.spinner("Fetching pending orders..."):
                 try:
+                    user_email = st.session_state.get("user_email", "local")
+                    log_activity(user_email, "Pending Order Count", "fetch", "refresh orders")
+
                     calculator = SquarespacePanelCalculator(api_key)
                     st.session_state.product_counts = calculator.get_product_counts()
                 except Exception as e:
@@ -716,6 +725,9 @@ elif tool == "Mystery Bundle Counter":
         else:
             with st.spinner(f"Fetching {status_filter.lower()} orders..."):
                 try:
+                    user_email = st.session_state.get("user_email", "local")
+                    log_activity(user_email, "Mystery Bundle Counter", "fetch", status_filter)
+
                     orders = fetch_orders(status_filter)
                     results = count_mystery_bundles(orders)
                     results['order_count'] = len(orders)
@@ -882,6 +894,10 @@ elif tool == "Leather Weight Calculator":
                         'notes': notes
                     }
                     save_coefficients(coefficients, COEFFICIENTS_FILE)
+
+                    user_email = st.session_state.get("user_email", "local")
+                    log_activity(user_email, "Leather Weight Calculator", "save", f"{leather_name}: {new_coefficient:.4f}")
+
                     st.success(f"Saved: {leather_name} = {new_coefficient:.4f} lbs/sqft")
                     st.rerun()
 
@@ -914,6 +930,9 @@ elif tool == "Swatch Book Generator":
     st.markdown("Generate a PDF reference guide of all leather colors from the website.")
 
     if st.button("Generate Swatch Book PDF", type="primary"):
+        user_email = st.session_state.get("user_email", "local")
+        log_activity(user_email, "Swatch Book Generator", "generate", "PDF")
+
         cmd = ["python", str(SCRIPTS_DIR / "swatch_book_contents.py")]
 
         stdout, stderr, code = run_script(cmd, "swatch book generator")
@@ -1039,6 +1058,9 @@ elif tool == "Material Bank Leads":
                     status_text.text(msg)
 
                 with st.spinner("Importing leads and creating activities..."):
+                    user_email = st.session_state.get("user_email", "local")
+                    log_activity(user_email, "Material Bank Leads", "import", "started")
+
                     results = process_materialbank_import(
                         st.session_state['mb_ready_df'],
                         st.session_state['mb_existing_contacts'],

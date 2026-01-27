@@ -401,3 +401,64 @@ def log_materialbank_import(details: List[Dict], total_activities: int, user_ema
         last_detail = details[-1]
         with open(file_path, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{last_detail['name']},{last_detail['email']},{last_detail['company']},{total_activities},{user_email}\n")
+
+
+# =============================================================================
+# Activity Log Storage
+# =============================================================================
+
+def log_activity(user_email: str, tool: str, action: str, details: str = ""):
+    """Log user activity to Google Sheets (cloud only)."""
+    if not is_cloud_deployment():
+        return
+
+    conn = get_gsheets_connection()
+    if not conn:
+        return
+
+    try:
+        # Read existing data
+        df = conn.read(worksheet="activity_log", ttl=0)
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=['timestamp', 'user_email', 'tool', 'action', 'details'])
+
+        # Add new row
+        new_row = pd.DataFrame([{
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'user_email': user_email,
+            'tool': tool,
+            'action': action,
+            'details': details
+        }])
+        df = pd.concat([df, new_row], ignore_index=True)
+
+        # Keep only last 1000 entries to prevent sheet from growing too large
+        if len(df) > 1000:
+            df = df.tail(1000)
+
+        # Write back
+        conn.update(worksheet="activity_log", data=df)
+    except Exception as e:
+        # Don't show errors for logging - it's not critical
+        pass
+
+
+def get_recent_activity(limit: int = 50) -> List[Dict]:
+    """Get recent activity log entries."""
+    if not is_cloud_deployment():
+        return []
+
+    conn = get_gsheets_connection()
+    if not conn:
+        return []
+
+    try:
+        df = conn.read(worksheet="activity_log", ttl=0)
+        if df is None or df.empty:
+            return []
+
+        # Return most recent entries
+        df = df.tail(limit)
+        return df.to_dict('records')[::-1]  # Reverse to show newest first
+    except Exception:
+        return []
