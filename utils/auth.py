@@ -89,6 +89,12 @@ def get_local_authenticator():
 
             auth_config = st.secrets.get('auth', {})
 
+            # Debug: show what client_id is being used
+            client_id = auth_config.get('client_id', 'NOT SET')
+            redirect_uri = auth_config.get('redirect_uri', 'NOT SET')
+            st.sidebar.caption(f"Debug - Client ID: {client_id[:20]}...")
+            st.sidebar.caption(f"Debug - Redirect: {redirect_uri}")
+
             # Path to credentials file
             creds_path = Path(__file__).parent.parent / '.streamlit' / 'google_oauth_credentials.json'
 
