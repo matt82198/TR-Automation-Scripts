@@ -122,6 +122,10 @@ def get_user_permissions():
     if not is_cloud_deployment():
         return {"role": "admin", "tools": "all", "materialbank": True}
 
+    # If auth is skipped (SKIP_AUTH=true), grant admin access
+    if os.environ.get('SKIP_AUTH', '').lower() == 'true' or get_secret('SKIP_AUTH', '').lower() == 'true':
+        return {"role": "admin", "tools": "all", "materialbank": True}
+
     # Check session for authenticated user email
     user_email = st.session_state.get("user_email", "").lower()
     permissions = load_user_permissions()
