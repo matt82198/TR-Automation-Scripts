@@ -225,7 +225,7 @@ if not available_tools:
     st.error("No tools available for your access level.")
     st.stop()
 
-# Build tool list and lookup
+# Build tool list with category grouping
 all_tools = []
 tool_to_info = {}
 for category, cat_data in available_tools.items():
@@ -237,38 +237,32 @@ for category, cat_data in available_tools.items():
             "description": tool_data["description"]
         }
 
-# Initialize selected tool
+# Display categories and tools
+for category, cat_data in available_tools.items():
+    st.sidebar.markdown(f"**{cat_data['icon']} {category}**")
+    tool_names = list(cat_data["tools"].keys())
+
+    for tool_name in tool_names:
+        tool_data = cat_data["tools"][tool_name]
+        if st.sidebar.button(
+            tool_name,
+            key=f"btn_{tool_name}",
+            use_container_width=True
+        ):
+            st.session_state.selected_tool = tool_name
+
+    st.sidebar.markdown("")  # Spacing between categories
+
+# Get selected tool (default to first if not set)
 if 'selected_tool' not in st.session_state or st.session_state.selected_tool not in all_tools:
     st.session_state.selected_tool = all_tools[0]
 
-# Collapsible categories with radio-style selection
-for category, cat_data in available_tools.items():
-    with st.sidebar.expander(f"{cat_data['icon']} {category}", expanded=True):
-        tool_names = list(cat_data["tools"].keys())
-
-        # Check if current selection is in this category
-        current_in_category = st.session_state.selected_tool in tool_names
-        default_idx = tool_names.index(st.session_state.selected_tool) if current_in_category else None
-
-        selected = st.radio(
-            f"Select from {category}",
-            tool_names,
-            index=default_idx if default_idx is not None else 0,
-            key=f"radio_{category}",
-            label_visibility="collapsed"
-        )
-
-        # Update selection if user picked from this category
-        if selected and selected != st.session_state.selected_tool and current_in_category is False:
-            st.session_state.selected_tool = selected
-        elif selected and current_in_category:
-            st.session_state.selected_tool = selected
-
-        # Show description for selected tool in this category
-        if selected in cat_data["tools"]:
-            st.caption(cat_data["tools"][selected]["description"])
-
 tool = st.session_state.selected_tool
+
+# Show current selection and description
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"**Selected:** {tool}")
+st.sidebar.caption(tool_to_info[tool]["description"])
 
 # Show user info in sidebar
 show_user_info_sidebar()
