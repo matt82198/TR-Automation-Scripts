@@ -130,8 +130,13 @@ def get_user_permissions():
     user_email = st.session_state.get("user_email", "").lower()
     permissions = load_user_permissions()
 
+    # If user is in permissions file, use their configured role
     if user_email in permissions:
         return permissions[user_email]
+
+    # Default: any authenticated @thetanneryrow.com user gets standard role
+    if user_email.endswith("@thetanneryrow.com"):
+        return {"role": "standard", "tools": "", "materialbank": False}
 
     return {"role": "none", "tools": "", "materialbank": False}
 
