@@ -19,9 +19,20 @@ AUTHORIZED_DOMAIN = "@thetanneryrow.com"
 
 def is_streamlit_cloud() -> bool:
     """Check if running on Streamlit Cloud."""
-    return os.environ.get('STREAMLIT_SHARING_MODE') == 'true' or \
-           os.environ.get('IS_STREAMLIT_CLOUD') == 'true' or \
-           'streamlit.app' in os.environ.get('HOSTNAME', '')
+    # Check environment variables
+    if os.environ.get('STREAMLIT_SHARING_MODE') == 'true':
+        return True
+    if os.environ.get('IS_STREAMLIT_CLOUD') == 'true':
+        return True
+    if 'streamlit.app' in os.environ.get('HOSTNAME', ''):
+        return True
+    # Check if secrets are configured (indicates cloud deployment)
+    try:
+        if hasattr(st, 'secrets') and 'APP_PASSWORD' in st.secrets:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def get_authorized_emails() -> List[str]:
@@ -168,13 +179,11 @@ def show_unauthorized_page(email: Optional[str] = None):
     **Need access?** Contact your administrator to be added to the authorized users list.
     """)
 
-    # Logout button for both modes
-    if is_streamlit_cloud():
-        if st.button("🔓 Sign out and try another account"):
-            st.logout()
-    elif LOCAL_AUTH_AVAILABLE and 'authenticator' in st.session_state:
-        if st.button("🔓 Sign out and try another account"):
-            st.session_state.authenticator.logout()
+    # Logout button
+    if st.button("Sign out and try again"):
+        st.session_state['authenticated'] = False
+        st.session_state['user_email'] = ''
+        st.rerun()
 
 
 def show_user_info_sidebar():
