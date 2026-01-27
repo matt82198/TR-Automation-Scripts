@@ -432,9 +432,9 @@ def log_activity(user_email: str, tool: str, action: str, details: str = ""):
         }])
         df = pd.concat([df, new_row], ignore_index=True)
 
-        # Keep only last 1000 entries to prevent sheet from growing too large
+        # Evict oldest 100 entries when over 1000 (batch eviction for efficiency)
         if len(df) > 1000:
-            df = df.tail(1000)
+            df = df.tail(900)  # Keep 900, so we don't evict on every single new entry
 
         # Write back
         conn.update(worksheet="activity_log", data=df)
