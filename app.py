@@ -221,37 +221,36 @@ available_tools = get_available_tools()
 
 st.sidebar.title("Navigation")
 
-# Initialize selected tool in session state
-if 'selected_tool' not in st.session_state:
-    # Default to first available tool
-    for cat_data in available_tools.values():
-        for tool_name in cat_data["tools"].keys():
-            st.session_state.selected_tool = tool_name
-            break
-        break
-
 # Build collapsible category navigation
 if not available_tools:
     st.error("No tools available for your access level.")
     st.stop()
 
+# Build flat list of tools with category info for radio
+tool_options = []
+tool_descriptions = {}
 for category, cat_data in available_tools.items():
-    with st.sidebar.expander(f"{cat_data['icon']} {category}", expanded=True):
-        for tool_name, tool_data in cat_data["tools"].items():
-            # Highlight selected tool
-            is_selected = st.session_state.get('selected_tool') == tool_name
-            if st.button(
-                f"{'> ' if is_selected else ''}{tool_name}",
-                key=f"nav_{tool_name}",
-                use_container_width=True,
-                type="primary" if is_selected else "secondary"
-            ):
-                st.session_state.selected_tool = tool_name
-                st.rerun()
-            # Show description under the button
-            st.caption(tool_data["description"])
+    for tool_name, tool_data in cat_data["tools"].items():
+        display_name = f"{cat_data['icon']} {tool_name}"
+        tool_options.append(display_name)
+        tool_descriptions[display_name] = {
+            "name": tool_name,
+            "category": category,
+            "description": tool_data["description"]
+        }
 
-tool = st.session_state.get('selected_tool', '')
+# Radio selection
+selected_display = st.sidebar.radio(
+    "Select Tool",
+    tool_options,
+    label_visibility="collapsed"
+)
+
+# Get actual tool name from selection
+tool = tool_descriptions[selected_display]["name"]
+
+# Show description
+st.sidebar.caption(tool_descriptions[selected_display]["description"])
 
 # Show user info in sidebar
 show_user_info_sidebar()
