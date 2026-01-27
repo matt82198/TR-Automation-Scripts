@@ -70,6 +70,10 @@ TOOL_CATEGORIES = {
             "Mystery Bundle Counter": {
                 "description": "Track mystery bundle inventory",
                 "permission": "standard"
+            },
+            "Swatch Book Generator": {
+                "description": "Generate swatch book page layouts",
+                "permission": "standard"
             }
         }
     },
@@ -78,10 +82,6 @@ TOOL_CATEGORIES = {
         "tools": {
             "Leather Weight Calculator": {
                 "description": "Calculate box weights for shipping",
-                "permission": "standard"
-            },
-            "Swatch Book Generator": {
-                "description": "Generate swatch book page layouts",
                 "permission": "standard"
             }
         }
@@ -214,38 +214,42 @@ st.markdown("---")
 
 available_tools = get_available_tools()
 
-# Build tool list for selection
-tool_list = []
-tool_to_category = {}
-
 st.sidebar.title("Navigation")
 
-for category, cat_data in available_tools.items():
-    st.sidebar.markdown(f"### {cat_data['icon']} {category}")
-    for tool_name, tool_data in cat_data["tools"].items():
-        tool_list.append(tool_name)
-        tool_to_category[tool_name] = category
+# Initialize selected tool in session state
+if 'selected_tool' not in st.session_state:
+    # Default to first available tool
+    for cat_data in available_tools.values():
+        for tool_name in cat_data["tools"].keys():
+            st.session_state.selected_tool = tool_name
+            break
+        break
 
-# Tool selection
-if tool_list:
-    tool = st.sidebar.radio(
-        "Select Tool",
-        tool_list,
-        label_visibility="collapsed"
-    )
-else:
+# Build collapsible category navigation
+if not available_tools:
     st.error("No tools available for your access level.")
     st.stop()
 
-# Show tool description
-if tool in tool_to_category:
-    for cat_data in available_tools.values():
-        if tool in cat_data["tools"]:
-            st.sidebar.caption(cat_data["tools"][tool]["description"])
-            break
+for category, cat_data in available_tools.items():
+    with st.sidebar.expander(f"{cat_data['icon']} {category}", expanded=True):
+        for tool_name, tool_data in cat_data["tools"].items():
+            # Highlight selected tool
+            is_selected = st.session_state.get('selected_tool') == tool_name
+            if st.button(
+                f"{'> ' if is_selected else ''}{tool_name}",
+                key=f"nav_{tool_name}",
+                use_container_width=True,
+                type="primary" if is_selected else "secondary"
+            ):
+                st.session_state.selected_tool = tool_name
+                st.rerun()
+            # Show description under the button
+            st.caption(tool_data["description"])
 
-# Show user info in sidebar (if authenticated)
-# show_user_info_sidebar()  # Disabled for local network access
+tool = st.session_state.get('selected_tool', '')
+
+# Show user info in sidebar
+show_user_info_sidebar()
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"Role: {user_role.title()}")
