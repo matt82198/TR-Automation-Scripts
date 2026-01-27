@@ -56,7 +56,7 @@ def load_import_log_cloud() -> Set[str]:
         return set()
 
     try:
-        df = conn.read(worksheet="import_log", ttl=60)
+        df = conn.read(worksheet="import_log", ttl=0)
         if df is not None and 'order_number' in df.columns:
             return set(df['order_number'].astype(str).tolist())
     except Exception as e:
@@ -125,7 +125,7 @@ def load_missing_inventory_cloud() -> Set[str]:
         return set()
 
     try:
-        df = conn.read(worksheet="missing_inventory", ttl=60)
+        df = conn.read(worksheet="missing_inventory", ttl=0)
         if df is not None and 'unique_id' in df.columns:
             return set(df['unique_id'].astype(str).tolist())
     except Exception as e:
@@ -204,7 +204,7 @@ def load_coefficients_cloud() -> Dict[str, Dict[str, Any]]:
         return {}
 
     try:
-        df = conn.read(worksheet="leather_coefficients", ttl=60)
+        df = conn.read(worksheet="leather_coefficients", ttl=0)
         if df is None or df.empty:
             return {}
 
