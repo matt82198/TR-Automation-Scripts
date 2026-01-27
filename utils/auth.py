@@ -220,9 +220,14 @@ def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
 
     # Try Streamlit secrets first
     try:
-        if hasattr(st, 'secrets') and key in st.secrets:
-            return st.secrets[key]
-    except Exception:
+        if hasattr(st, 'secrets'):
+            # Try direct access
+            if key in st.secrets:
+                return st.secrets[key]
+            # Try as attribute
+            if hasattr(st.secrets, key):
+                return getattr(st.secrets, key)
+    except Exception as e:
         pass
 
     # Fall back to environment variable
