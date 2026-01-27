@@ -4,7 +4,7 @@ matt@thetanneryrow.com,admin,all,true
 sueeyles@thetanneryrow.com,admin,all,true
 jenna@thetanneryrow.com,admin,all,true
 john@horween.com,admin,all,true
-laura@thetanneryrow.com,admin,all,true
+laura@thetanneryrow.com,custom,,true
 
 # Standard users - access to Order Management + Inventory & Shipping (not Billing)
 tylerculliton@thetanneryrow.com,standard,,false
