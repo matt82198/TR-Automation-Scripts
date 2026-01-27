@@ -939,44 +939,12 @@ elif tool == "Material Bank Leads":
         get_api_key, load_existing_contacts, convert_materialbank_to_method,
         process_materialbank_import
     )
+    from gsheets_storage import get_last_materialbank_import, log_materialbank_import
 
     MATERIALBANK_LOG = CONFIG_DIR / "materialbank_import_log.csv"
 
-    def get_last_import():
-        """Get the last import info from the log."""
-        if not MATERIALBANK_LOG.exists():
-            return None
-        try:
-            with open(MATERIALBANK_LOG, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                if len(lines) > 1:  # Has data beyond header
-                    last_line = lines[-1].strip()
-                    if last_line:
-                        parts = last_line.split(',')
-                        if len(parts) >= 5:
-                            return {
-                                'date': parts[0],
-                                'lead_name': parts[1],
-                                'lead_email': parts[2],
-                                'lead_company': parts[3],
-                                'activities_created': parts[4],
-                                'imported_by': parts[5] if len(parts) > 5 else ''
-                            }
-        except:
-            pass
-        return None
-
-    def log_import(details, total_activities):
-        """Log import details to the CSV."""
-        if not details:
-            return
-        last_detail = details[-1]
-        user_email = st.session_state.get("user_email", "local")
-        with open(MATERIALBANK_LOG, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{last_detail['name']},{last_detail['email']},{last_detail['company']},{total_activities},{user_email}\n")
-
-    # Show last import info
-    last_import = get_last_import()
+    # Show last import info (uses cloud or local automatically)
+    last_import = get_last_materialbank_import(MATERIALBANK_LOG)
     if last_import:
         st.info(f"**Last Import:** {last_import['date']} — {last_import['lead_name']} ({last_import['lead_company']}) — {last_import['activities_created']} activities")
     else:
@@ -1091,8 +1059,9 @@ elif tool == "Material Bank Leads":
                             status = "existing" if detail.get('is_existing') else "new"
                             st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']} [{status}]")
 
-                    # Log the import
-                    log_import(results['details'], results['activities_created'])
+                    # Log the import (uses cloud or local automatically)
+                    user_email = st.session_state.get("user_email", "local")
+                    log_materialbank_import(results['details'], results['activities_created'], user_email, MATERIALBANK_LOG)
 
                 # Clear session state
                 del st.session_state['mb_ready_df']

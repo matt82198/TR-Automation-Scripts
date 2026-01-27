@@ -307,3 +307,97 @@ def save_coefficients(coefficients: Dict[str, Dict[str, Any]], file_path: Option
         save_coefficients_cloud(coefficients)
     elif file_path:
         save_coefficients_local(file_path, coefficients)
+
+
+# =============================================================================
+# Material Bank Import Log Storage
+# =============================================================================
+
+def get_last_materialbank_import_cloud() -> Optional[Dict[str, str]]:
+    """Get the last Material Bank import from Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return None
+
+    try:
+        df = conn.read(worksheet="materialbank_log", ttl=0)
+        if df is not None and not df.empty and len(df) > 0:
+            last_row = df.iloc[-1]
+            return {
+                'date': str(last_row.get('date', '')),
+                'lead_name': str(last_row.get('lead_name', '')),
+                'lead_email': str(last_row.get('lead_email', '')),
+                'lead_company': str(last_row.get('lead_company', '')),
+                'activities_created': str(last_row.get('activities_created', '')),
+                'imported_by': str(last_row.get('imported_by', ''))
+            }
+    except Exception as e:
+        st.warning(f"Could not load Material Bank log from Google Sheets: {e}")
+
+    return None
+
+
+def log_materialbank_import_cloud(details: List[Dict], total_activities: int, user_email: str):
+    """Log Material Bank import to Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn or not details:
+        return
+
+    try:
+        # Read existing data
+        df = conn.read(worksheet="materialbank_log", ttl=0)
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=['date', 'lead_name', 'lead_email', 'lead_company', 'activities_created', 'imported_by'])
+
+        # Add new row for the last imported lead
+        last_detail = details[-1]
+        new_row = pd.DataFrame([{
+            'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'lead_name': last_detail.get('name', ''),
+            'lead_email': last_detail.get('email', ''),
+            'lead_company': last_detail.get('company', ''),
+            'activities_created': str(total_activities),
+            'imported_by': user_email
+        }])
+        df = pd.concat([df, new_row], ignore_index=True)
+
+        # Write back
+        conn.update(worksheet="materialbank_log", data=df)
+    except Exception as e:
+        st.warning(f"Could not log Material Bank import: {e}")
+
+
+def get_last_materialbank_import(file_path: Optional[Path] = None) -> Optional[Dict[str, str]]:
+    """Get last Material Bank import from storage."""
+    if is_cloud_deployment():
+        return get_last_materialbank_import_cloud()
+    elif file_path and file_path.exists():
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                if len(lines) > 1:
+                    last_line = lines[-1].strip()
+                    if last_line:
+                        parts = last_line.split(',')
+                        if len(parts) >= 5:
+                            return {
+                                'date': parts[0],
+                                'lead_name': parts[1],
+                                'lead_email': parts[2],
+                                'lead_company': parts[3],
+                                'activities_created': parts[4],
+                                'imported_by': parts[5] if len(parts) > 5 else ''
+                            }
+        except Exception:
+            pass
+    return None
+
+
+def log_materialbank_import(details: List[Dict], total_activities: int, user_email: str, file_path: Optional[Path] = None):
+    """Log Material Bank import to storage."""
+    if is_cloud_deployment():
+        log_materialbank_import_cloud(details, total_activities, user_email)
+    elif file_path and details:
+        last_detail = details[-1]
+        with open(file_path, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{last_detail['name']},{last_detail['email']},{last_detail['company']},{total_activities},{user_email}\n")
