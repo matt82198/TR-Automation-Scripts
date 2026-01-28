@@ -967,7 +967,8 @@ elif tool == "Material Bank Leads":
     import pandas as pd
     from materialbank_method import (
         get_api_key, load_existing_contacts, convert_materialbank_to_method,
-        process_materialbank_import, fetch_orphaned_activities, cleanup_orphaned_activities
+        process_materialbank_import, fetch_orphaned_activities, cleanup_orphaned_activities,
+        fetch_all_mb_activities, find_duplicate_activities
     )
     from gsheets_storage import get_last_materialbank_import, log_materialbank_import
 
@@ -1110,30 +1111,52 @@ elif tool == "Material Bank Leads":
 
     # Cleanup section
     st.divider()
-    st.subheader("Cleanup Orphaned Activities")
-    st.markdown("Link existing MB Samples activities to contacts. Use this to fix activities that were created before contacts were properly linked.")
+    st.subheader("Cleanup Activities")
+    st.markdown("Remove duplicate activities and link orphaned activities to contacts.")
 
-    if st.button("Check for Orphaned Activities"):
-        with st.spinner("Scanning for orphaned activities..."):
-            orphaned = fetch_orphaned_activities()
+    if st.button("Check for Issues"):
+        with st.spinner("Scanning for orphaned activities and duplicates..."):
+            all_activities = fetch_all_mb_activities()
+            orphaned = [a for a in all_activities if not a.get('Contacts_RecordID')]
+            duplicates, _ = find_duplicate_activities(all_activities)
+
+        issues_found = False
+
+        if duplicates:
+            st.warning(f"Found **{len(duplicates)}** duplicate activities (same email + date).")
+            st.session_state['mb_duplicates_count'] = len(duplicates)
+            issues_found = True
+
+            with st.expander("Preview Duplicates", expanded=False):
+                for act in duplicates[:20]:
+                    st.text(f"#{act['RecordID']}: {act.get('ContactName', 'N/A')} ({act.get('ContactEmail', 'N/A')}) - {act.get('DueDateStart', 'N/A')[:10]}")
+                if len(duplicates) > 20:
+                    st.text(f"... and {len(duplicates) - 20} more")
 
         if orphaned:
-            st.warning(f"Found **{len(orphaned)}** orphaned MB Samples activities without linked contacts.")
+            st.warning(f"Found **{len(orphaned)}** orphaned activities without linked contacts.")
             st.session_state['mb_orphaned'] = orphaned
+            issues_found = True
 
             with st.expander("Preview Orphaned Activities", expanded=False):
                 for act in orphaned[:20]:
                     st.text(f"#{act['RecordID']}: {act.get('ContactName', 'N/A')} ({act.get('ContactEmail', 'N/A')})")
                 if len(orphaned) > 20:
                     st.text(f"... and {len(orphaned) - 20} more")
-        else:
-            st.success("No orphaned activities found. All activities are properly linked!")
+
+        if not issues_found:
+            st.success("No issues found. All activities are properly linked with no duplicates!")
             if 'mb_orphaned' in st.session_state:
                 del st.session_state['mb_orphaned']
+            if 'mb_duplicates_count' in st.session_state:
+                del st.session_state['mb_duplicates_count']
 
-    if st.session_state.get('mb_orphaned'):
-        orphaned_count = len(st.session_state['mb_orphaned'])
-        if st.button(f"Run Cleanup ({orphaned_count} activities)", type="primary"):
+    has_issues = st.session_state.get('mb_orphaned') or st.session_state.get('mb_duplicates_count', 0) > 0
+    if has_issues:
+        orphaned_count = len(st.session_state.get('mb_orphaned', []))
+        dup_count = st.session_state.get('mb_duplicates_count', 0)
+        total_issues = orphaned_count + dup_count
+        if st.button(f"Run Cleanup ({total_issues} issues)", type="primary"):
             progress_bar = st.progress(0)
             status_text = st.empty()
 
@@ -1153,14 +1176,16 @@ elif tool == "Material Bank Leads":
             # Show results
             st.subheader("Cleanup Results")
 
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
-                st.metric("Orphaned Found", results['orphaned_found'])
+                st.metric("Duplicates Removed", results.get('duplicates_removed', 0))
             with col2:
-                st.metric("Activities Linked", results['activities_linked'])
+                st.metric("Orphaned Found", results['orphaned_found'])
             with col3:
-                st.metric("Contacts Created", results['contacts_created'])
+                st.metric("Activities Linked", results['activities_linked'])
             with col4:
+                st.metric("Contacts Created", results['contacts_created'])
+            with col5:
                 st.metric("Skipped (no email)", results['skipped_no_email'])
 
             if results['errors']:
@@ -1169,16 +1194,24 @@ elif tool == "Material Bank Leads":
                     for err in results['errors']:
                         st.text(err)
 
+            if results.get('duplicates_deleted'):
+                with st.expander("Duplicates Deleted", expanded=False):
+                    for detail in results['duplicates_deleted']:
+                        st.markdown(f"- Activity #{detail['activity_id']}: **{detail['name']}** ({detail['email']})")
+
             if results['details']:
-                with st.expander("Cleanup Details", expanded=True):
+                with st.expander("Activities Linked", expanded=True):
                     for detail in results['details']:
                         status = "NEW contact" if detail.get('is_new_contact') else "existing contact"
                         st.markdown(f"- Activity #{detail['activity_id']}: **{detail['contact_name']}** -> Contact #{detail['contact_id']} [{status}]")
 
-            # Clear orphaned state
-            del st.session_state['mb_orphaned']
+            # Clear session state
+            if 'mb_orphaned' in st.session_state:
+                del st.session_state['mb_orphaned']
+            if 'mb_duplicates_count' in st.session_state:
+                del st.session_state['mb_duplicates_count']
 
-            log_activity(user_email, "Material Bank Leads", "cleanup", f"completed: {results['activities_linked']} linked, {results['contacts_created']} created")
+            log_activity(user_email, "Material Bank Leads", "cleanup", f"completed: {results.get('duplicates_removed', 0)} duplicates removed, {results['activities_linked']} linked, {results['contacts_created']} created")
             st.success("Cleanup complete!")
 
 

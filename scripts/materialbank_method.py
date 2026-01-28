@@ -420,14 +420,94 @@ def update_activity_contact(activity_id, contacts_record_id):
     return False, f"API {r.status_code}: {r.text[:200]}"
 
 
-def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None):
+def delete_activity(activity_id):
+    """Delete an activity from Method CRM."""
+    headers = get_headers()
+
+    r = requests.delete(f'{BASE_URL}/tables/Activity/{activity_id}', headers=headers)
+
+    if r.status_code in (200, 204):
+        return True, None
+    return False, f"API {r.status_code}: {r.text[:200]}"
+
+
+def fetch_all_mb_activities():
+    """Fetch ALL MB Samples activities."""
+    headers = get_headers()
+    all_activities = []
+    skip = 0
+
+    while True:
+        r = requests.get(
+            f'{BASE_URL}/tables/Activity?$filter=ActivityType_RecordID eq 22&skip={skip}&top=100',
+            headers=headers
+        )
+        if r.status_code == 429:
+            time.sleep(30)
+            continue
+        if r.status_code != 200:
+            break
+
+        batch = r.json().get('value', [])
+        if not batch:
+            break
+
+        all_activities.extend(batch)
+        skip += 100
+        time.sleep(0.15)
+
+    return all_activities
+
+
+def find_duplicate_activities(activities):
+    """
+    Find duplicate MB Samples activities (same email + same date).
+    Returns list of activity IDs to delete (keeps the one with highest RecordID).
+    """
+    from collections import defaultdict
+
+    by_email_date = defaultdict(list)
+
+    for act in activities:
+        email = (act.get('ContactEmail') or '').lower().strip()
+        due_date = act.get('DueDateStart', '')
+
+        if email:
+            key = f"{email}|{due_date}"
+            by_email_date[key].append(act)
+
+    duplicates_to_delete = []
+    duplicate_groups = []
+
+    for key, acts in by_email_date.items():
+        if len(acts) > 1:
+            # Sort by RecordID descending, keep the highest (most recent)
+            sorted_acts = sorted(acts, key=lambda x: x['RecordID'], reverse=True)
+            keep = sorted_acts[0]
+            delete = sorted_acts[1:]
+
+            for act in delete:
+                duplicates_to_delete.append(act)
+                duplicate_groups.append({
+                    'keep_id': keep['RecordID'],
+                    'delete_id': act['RecordID'],
+                    'email': act.get('ContactEmail', ''),
+                    'name': act.get('ContactName', ''),
+                    'date': act.get('DueDateStart', '')
+                })
+
+    return duplicates_to_delete, duplicate_groups
+
+
+def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, remove_duplicates=True):
     """
     Find orphaned MB Samples activities and link them to contacts.
-    Creates contacts if they don't exist.
+    Creates contacts if they don't exist. Optionally removes duplicates.
 
     Args:
         existing_contacts: Dict of email -> contact info (optional, will fetch if None)
         progress_callback: Function to call with progress updates (msg, pct)
+        remove_duplicates: If True, also remove duplicate activities (same email+date)
 
     Returns:
         Dict with results and stats
@@ -437,8 +517,10 @@ def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None):
         'activities_linked': 0,
         'contacts_created': 0,
         'skipped_no_email': 0,
+        'duplicates_removed': 0,
         'errors': [],
-        'details': []
+        'details': [],
+        'duplicates_deleted': []
     }
 
     def update_progress(msg, pct=None):
@@ -450,16 +532,45 @@ def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None):
         update_progress("Loading existing contacts from Method...", 0)
         existing_contacts = load_existing_contacts()
 
-    # Fetch orphaned activities
-    update_progress("Fetching orphaned activities...", 10)
+    # Fetch ALL MB Samples activities for duplicate detection
+    update_progress("Fetching all MB Samples activities...", 5)
+    all_activities = fetch_all_mb_activities()
+
+    # Remove duplicates first if requested
+    if remove_duplicates:
+        update_progress("Checking for duplicates...", 10)
+        duplicates_to_delete, duplicate_groups = find_duplicate_activities(all_activities)
+
+        if duplicates_to_delete:
+            update_progress(f"Removing {len(duplicates_to_delete)} duplicate activities...", 12)
+
+            for idx, act in enumerate(duplicates_to_delete):
+                success, error = delete_activity(act['RecordID'])
+                if success:
+                    results['duplicates_removed'] += 1
+                    results['duplicates_deleted'].append({
+                        'activity_id': act['RecordID'],
+                        'name': act.get('ContactName', ''),
+                        'email': act.get('ContactEmail', '')
+                    })
+                else:
+                    results['errors'].append(f"Failed to delete duplicate #{act['RecordID']}: {error}")
+                time.sleep(0.2)
+
+    # Fetch orphaned activities (re-fetch to exclude deleted duplicates)
+    update_progress("Fetching orphaned activities...", 15)
     orphaned = fetch_orphaned_activities()
     results['orphaned_found'] = len(orphaned)
 
-    if not orphaned:
-        update_progress("No orphaned activities found!", 100)
+    if not orphaned and results['duplicates_removed'] == 0:
+        update_progress("No cleanup needed!", 100)
         return results
 
-    update_progress(f"Found {len(orphaned)} orphaned activities", 15)
+    if not orphaned:
+        update_progress("Duplicate removal complete!", 100)
+        return results
+
+    update_progress(f"Found {len(orphaned)} orphaned activities", 18)
 
     # Process each orphaned activity
     for idx, activity in enumerate(orphaned):
