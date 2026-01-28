@@ -126,19 +126,52 @@ def convert_materialbank_to_method(df, existing_emails=None):
 
 
 def create_contact(first_name, last_name, company, email, phone=None, mobile=None):
-    """Create a new contact/lead in Method CRM."""
+    """
+    Create a new lead in Method CRM.
+
+    Creates a Customer (with IsLeadStatusOnly=True) and a linked Contact.
+    Returns the Contact RecordID for activity linking.
+    """
     headers = get_headers(content_type=True)
 
+    # Build the name - use company if provided, otherwise use person name
+    if company:
+        name = company
+    else:
+        name = f"{first_name} {last_name}".strip()
+
+    # Step 1: Create Customer as a lead
+    lead_data = {
+        'Name': name,
+        'FirstName': first_name,
+        'LastName': last_name,
+        'CompanyName': company or '',
+        'Email': email,
+        'IsLeadStatusOnly': True,  # This makes it a lead, not a customer
+        'LeadStatus_RecordID': 2,  # Open
+        'LeadSource_RecordID': 14,  # Material Bank
+        'LeadRating_RecordID': 2,  # Warm
+        'SalesRep_RecordID': 3,  # Laura Ablan (LA)
+    }
+
+    if phone:
+        lead_data['Phone'] = phone
+    if mobile:
+        lead_data['Mobile'] = mobile
+
+    r = requests.post(f'{BASE_URL}/tables/Customer', headers=headers, json=lead_data)
+
+    if r.status_code != 201:
+        return None, f"Customer API {r.status_code}: {r.text[:200]}"
+
+    customer_id = int(r.text)
+
+    # Step 2: Create Contact linked to this Customer
     contact_data = {
         'FirstName': first_name,
         'LastName': last_name,
-        'CompanyName': company,
         'Email': email,
-        'TagList': 'Arazzo',
-        'SalesRepRecordID': 3,  # Laura Ablan (LA)
-        'LeadSource': 'Material Bank',
-        'LeadRating': 'Warm',
-        'LeadStatus': 'Open',
+        'Entity_RecordID': customer_id,
     }
 
     if phone:
@@ -149,8 +182,12 @@ def create_contact(first_name, last_name, company, email, phone=None, mobile=Non
     r = requests.post(f'{BASE_URL}/tables/Contacts', headers=headers, json=contact_data)
 
     if r.status_code == 201:
-        return int(r.text), None
-    return None, f"API {r.status_code}: {r.text[:200]}"
+        contact_id = int(r.text)
+        return contact_id, None
+    else:
+        # Customer was created but Contact failed - still return customer_id
+        # Activities can still reference by name/email even without Contact link
+        return customer_id, f"Contact API {r.status_code}: {r.text[:200]} (Customer #{customer_id} created)"
 
 
 def create_activity(contact_name, contact_email, company, samples, project_info, order_date, contacts_record_id=None):
