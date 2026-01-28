@@ -1000,6 +1000,11 @@ elif tool == "Material Bank Leads":
         mb_df = pd.read_csv(uploaded_file)
         st.success(f"Loaded {len(mb_df)} rows from {uploaded_file.name}")
 
+        # Store emails from uploaded file for targeted cleanup
+        uploaded_emails = set(mb_df['Email'].str.lower().str.strip().dropna().unique())
+        st.session_state['mb_uploaded_emails'] = uploaded_emails
+        st.session_state['mb_uploaded_filename'] = uploaded_file.name
+
         # Preview
         with st.expander("Preview Data", expanded=False):
             st.dataframe(mb_df.head(20))
@@ -1114,11 +1119,36 @@ elif tool == "Material Bank Leads":
     st.subheader("Cleanup Activities")
     st.markdown("Remove duplicate activities and link orphaned activities to contacts.")
 
+    # Scope selection
+    has_uploaded = 'mb_uploaded_emails' in st.session_state and st.session_state['mb_uploaded_emails']
+    if has_uploaded:
+        filename = st.session_state.get('mb_uploaded_filename', 'uploaded file')
+        email_count = len(st.session_state['mb_uploaded_emails'])
+        cleanup_scope = st.radio(
+            "Cleanup scope:",
+            ["uploaded_file", "all"],
+            format_func=lambda x: f"From uploaded file only ({email_count} emails from {filename})" if x == "uploaded_file" else "All MB Samples activities",
+            horizontal=True
+        )
+    else:
+        cleanup_scope = "all"
+        st.info("Upload a CSV file above to enable targeted cleanup for specific emails.")
+
     if st.button("Check for Issues"):
         with st.spinner("Scanning for orphaned activities and duplicates..."):
             all_activities = fetch_all_mb_activities()
+
+            # Filter by scope if needed
+            if cleanup_scope == "uploaded_file" and has_uploaded:
+                target_emails = st.session_state['mb_uploaded_emails']
+                all_activities = [a for a in all_activities if (a.get('ContactEmail') or '').lower().strip() in target_emails]
+                st.info(f"Filtered to {len(all_activities)} activities matching uploaded emails")
+
             orphaned = [a for a in all_activities if not a.get('Contacts_RecordID')]
             duplicates, _ = find_duplicate_activities(all_activities)
+
+            # Store scope for cleanup
+            st.session_state['mb_cleanup_scope'] = cleanup_scope
 
         issues_found = False
 
@@ -1169,7 +1199,12 @@ elif tool == "Material Bank Leads":
                 user_email = st.session_state.get("user_email", "local")
                 log_activity(user_email, "Material Bank Leads", "cleanup", "started")
 
-                results = cleanup_orphaned_activities(progress_callback=update_progress)
+                # Get target emails if scoped to uploaded file
+                target_emails = None
+                if st.session_state.get('mb_cleanup_scope') == 'uploaded_file':
+                    target_emails = st.session_state.get('mb_uploaded_emails')
+
+                results = cleanup_orphaned_activities(progress_callback=update_progress, target_emails=target_emails)
 
             progress_bar.progress(100)
 
@@ -1210,6 +1245,8 @@ elif tool == "Material Bank Leads":
                 del st.session_state['mb_orphaned']
             if 'mb_duplicates_count' in st.session_state:
                 del st.session_state['mb_duplicates_count']
+            if 'mb_cleanup_scope' in st.session_state:
+                del st.session_state['mb_cleanup_scope']
 
             log_activity(user_email, "Material Bank Leads", "cleanup", f"completed: {results.get('duplicates_removed', 0)} duplicates removed, {results['activities_linked']} linked, {results['contacts_created']} created")
             st.success("Cleanup complete!")

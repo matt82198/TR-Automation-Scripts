@@ -499,7 +499,7 @@ def find_duplicate_activities(activities):
     return duplicates_to_delete, duplicate_groups
 
 
-def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, remove_duplicates=True):
+def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, remove_duplicates=True, target_emails=None):
     """
     Find orphaned MB Samples activities and link them to contacts.
     Creates contacts if they don't exist. Optionally removes duplicates.
@@ -508,6 +508,7 @@ def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, 
         existing_contacts: Dict of email -> contact info (optional, will fetch if None)
         progress_callback: Function to call with progress updates (msg, pct)
         remove_duplicates: If True, also remove duplicate activities (same email+date)
+        target_emails: Optional set of emails to filter activities (for targeted cleanup)
 
     Returns:
         Dict with results and stats
@@ -536,6 +537,12 @@ def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, 
     update_progress("Fetching all MB Samples activities...", 5)
     all_activities = fetch_all_mb_activities()
 
+    # Filter by target emails if provided
+    if target_emails:
+        target_emails_lower = {e.lower().strip() for e in target_emails}
+        all_activities = [a for a in all_activities if (a.get('ContactEmail') or '').lower().strip() in target_emails_lower]
+        update_progress(f"Filtered to {len(all_activities)} activities matching target emails", 7)
+
     # Remove duplicates first if requested
     if remove_duplicates:
         update_progress("Checking for duplicates...", 10)
@@ -557,9 +564,16 @@ def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, 
                     results['errors'].append(f"Failed to delete duplicate #{act['RecordID']}: {error}")
                 time.sleep(0.2)
 
-    # Fetch orphaned activities (re-fetch to exclude deleted duplicates)
-    update_progress("Fetching orphaned activities...", 15)
-    orphaned = fetch_orphaned_activities()
+    # Find orphaned activities from filtered list (or re-fetch if duplicates were removed)
+    update_progress("Finding orphaned activities...", 15)
+    if results['duplicates_removed'] > 0:
+        # Re-fetch since we deleted some
+        all_activities = fetch_all_mb_activities()
+        if target_emails:
+            target_emails_lower = {e.lower().strip() for e in target_emails}
+            all_activities = [a for a in all_activities if (a.get('ContactEmail') or '').lower().strip() in target_emails_lower]
+
+    orphaned = [a for a in all_activities if not a.get('Contacts_RecordID')]
     results['orphaned_found'] = len(orphaned)
 
     if not orphaned and results['duplicates_removed'] == 0:
