@@ -159,12 +159,25 @@ def create_contact(first_name, last_name, company, email, phone=None, mobile=Non
     if mobile:
         lead_data['Mobile'] = mobile
 
-    r = requests.post(f'{BASE_URL}/tables/Customer', headers=headers, json=lead_data)
+    # Retry logic for rate limiting
+    for attempt in range(3):
+        r = requests.post(f'{BASE_URL}/tables/Customer', headers=headers, json=lead_data)
+
+        if r.status_code == 429:
+            time.sleep(30)  # Wait 30 seconds on rate limit
+            continue
+        break
 
     if r.status_code != 201:
-        return None, f"Customer API {r.status_code}: {r.text[:200]}"
+        error_text = r.text[:200] if r.text else 'No response'
+        # Check for duplicate error
+        if r.status_code == 400 and 'duplicate' in error_text.lower():
+            return None, f"Duplicate customer: {email}"
+        return None, f"Customer API {r.status_code}: {error_text}"
 
     customer_id = int(r.text)
+
+    time.sleep(0.5)  # Rate limiting between customer and contact creation
 
     # Step 2: Create Contact linked to this Customer
     contact_data = {
@@ -179,7 +192,13 @@ def create_contact(first_name, last_name, company, email, phone=None, mobile=Non
     if mobile:
         contact_data['Mobile'] = mobile
 
-    r = requests.post(f'{BASE_URL}/tables/Contacts', headers=headers, json=contact_data)
+    for attempt in range(3):
+        r = requests.post(f'{BASE_URL}/tables/Contacts', headers=headers, json=contact_data)
+
+        if r.status_code == 429:
+            time.sleep(30)
+            continue
+        break
 
     if r.status_code == 201:
         contact_id = int(r.text)
@@ -219,7 +238,14 @@ def create_activity(contact_name, contact_email, company, samples, project_info,
     if contacts_record_id:
         activity_data['Contacts_RecordID'] = contacts_record_id
 
-    r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=activity_data)
+    # Retry logic for rate limiting
+    for attempt in range(3):
+        r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=activity_data)
+
+        if r.status_code == 429:
+            time.sleep(30)
+            continue
+        break
 
     if r.status_code == 201:
         return int(r.text), None
@@ -244,7 +270,14 @@ def create_followup_activity(parent_activity_id, contact_name, contact_email, co
         'FollowUpFromActivityNo_RecordID': parent_activity_id,
     }
 
-    r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=followup_data)
+    # Retry logic for rate limiting
+    for attempt in range(3):
+        r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=followup_data)
+
+        if r.status_code == 429:
+            time.sleep(30)
+            continue
+        break
 
     if r.status_code == 201:
         return int(r.text), None
@@ -360,7 +393,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
             else:
                 results['errors'].append(f"Contact creation failed for {contact_name}: {contact_error}")
 
-            time.sleep(0.3)  # Rate limiting
+            time.sleep(1)  # Rate limiting - 1 second between lead creations
 
         # Create MB Samples activity for ALL leads
         activity_id, error = create_activity(
@@ -405,7 +438,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
             results['errors'].append(f"Activity failed for {contact_name}: {error}")
 
         results['leads_processed'] += 1
-        time.sleep(0.3)  # Rate limiting
+        time.sleep(1)  # Rate limiting - 1 second between leads
 
     update_progress("Complete!", 100)
     return results
