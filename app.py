@@ -967,7 +967,7 @@ elif tool == "Material Bank Leads":
     import pandas as pd
     from materialbank_method import (
         get_api_key, load_existing_contacts, convert_materialbank_to_method,
-        process_materialbank_import
+        process_materialbank_import, fetch_orphaned_activities, cleanup_orphaned_activities
     )
     from gsheets_storage import get_last_materialbank_import, log_materialbank_import
 
@@ -1070,14 +1070,16 @@ elif tool == "Material Bank Leads":
                 # Show results
                 st.subheader("Import Results")
 
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Leads Processed", results['leads_processed'])
                 with col2:
-                    st.metric("Activities Created", results['activities_created'])
+                    st.metric("Contacts Created", results.get('contacts_created', 0))
                 with col3:
-                    st.metric("Existing Updated", results.get('existing_updated', 0))
+                    st.metric("Activities Created", results['activities_created'])
                 with col4:
+                    st.metric("Existing Updated", results.get('existing_updated', 0))
+                with col5:
                     st.metric("Follow-ups Created", results['followups_created'])
 
                 if results['errors']:
@@ -1089,7 +1091,10 @@ elif tool == "Material Bank Leads":
                 if results['details']:
                     with st.expander("Import Details", expanded=True):
                         for detail in results['details']:
-                            status = "existing" if detail.get('is_existing') else "new"
+                            if detail.get('is_existing'):
+                                status = "existing contact"
+                            else:
+                                status = "NEW contact created"
                             st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']} [{status}]")
 
                     # Log the import (uses cloud or local automatically)
@@ -1102,6 +1107,79 @@ elif tool == "Material Bank Leads":
                 del st.session_state['mb_stats']
 
                 st.success("Import complete!")
+
+    # Cleanup section
+    st.divider()
+    st.subheader("Cleanup Orphaned Activities")
+    st.markdown("Link existing MB Samples activities to contacts. Use this to fix activities that were created before contacts were properly linked.")
+
+    if st.button("Check for Orphaned Activities"):
+        with st.spinner("Scanning for orphaned activities..."):
+            orphaned = fetch_orphaned_activities()
+
+        if orphaned:
+            st.warning(f"Found **{len(orphaned)}** orphaned MB Samples activities without linked contacts.")
+            st.session_state['mb_orphaned'] = orphaned
+
+            with st.expander("Preview Orphaned Activities", expanded=False):
+                for act in orphaned[:20]:
+                    st.text(f"#{act['RecordID']}: {act.get('ContactName', 'N/A')} ({act.get('ContactEmail', 'N/A')})")
+                if len(orphaned) > 20:
+                    st.text(f"... and {len(orphaned) - 20} more")
+        else:
+            st.success("No orphaned activities found. All activities are properly linked!")
+            if 'mb_orphaned' in st.session_state:
+                del st.session_state['mb_orphaned']
+
+    if st.session_state.get('mb_orphaned'):
+        orphaned_count = len(st.session_state['mb_orphaned'])
+        if st.button(f"Run Cleanup ({orphaned_count} activities)", type="primary"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            def update_progress(msg, pct=None):
+                status_text.text(msg)
+                if pct is not None:
+                    progress_bar.progress(pct / 100)
+
+            with st.spinner("Running cleanup..."):
+                user_email = st.session_state.get("user_email", "local")
+                log_activity(user_email, "Material Bank Leads", "cleanup", "started")
+
+                results = cleanup_orphaned_activities(progress_callback=update_progress)
+
+            progress_bar.progress(100)
+
+            # Show results
+            st.subheader("Cleanup Results")
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Orphaned Found", results['orphaned_found'])
+            with col2:
+                st.metric("Activities Linked", results['activities_linked'])
+            with col3:
+                st.metric("Contacts Created", results['contacts_created'])
+            with col4:
+                st.metric("Skipped (no email)", results['skipped_no_email'])
+
+            if results['errors']:
+                st.warning(f"{len(results['errors'])} errors occurred")
+                with st.expander("View Errors"):
+                    for err in results['errors']:
+                        st.text(err)
+
+            if results['details']:
+                with st.expander("Cleanup Details", expanded=True):
+                    for detail in results['details']:
+                        status = "NEW contact" if detail.get('is_new_contact') else "existing contact"
+                        st.markdown(f"- Activity #{detail['activity_id']}: **{detail['contact_name']}** -> Contact #{detail['contact_id']} [{status}]")
+
+            # Clear orphaned state
+            del st.session_state['mb_orphaned']
+
+            log_activity(user_email, "Material Bank Leads", "cleanup", f"completed: {results['activities_linked']} linked, {results['contacts_created']} created")
+            st.success("Cleanup complete!")
 
 
 # =============================================================================

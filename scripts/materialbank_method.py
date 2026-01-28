@@ -125,6 +125,34 @@ def convert_materialbank_to_method(df, existing_emails=None):
     return method_df, stats
 
 
+def create_contact(first_name, last_name, company, email, phone=None, mobile=None):
+    """Create a new contact/lead in Method CRM."""
+    headers = get_headers(content_type=True)
+
+    contact_data = {
+        'FirstName': first_name,
+        'LastName': last_name,
+        'CompanyName': company,
+        'Email': email,
+        'TagList': 'Arazzo',
+        'SalesRepRecordID': 3,  # Laura Ablan (LA)
+        'LeadSource': 'Material Bank',
+        'LeadRating': 'Warm',
+        'LeadStatus': 'Open',
+    }
+
+    if phone:
+        contact_data['Phone'] = phone
+    if mobile:
+        contact_data['Mobile'] = mobile
+
+    r = requests.post(f'{BASE_URL}/tables/Contacts', headers=headers, json=contact_data)
+
+    if r.status_code == 201:
+        return int(r.text), None
+    return None, f"API {r.status_code}: {r.text[:200]}"
+
+
 def create_activity(contact_name, contact_email, company, samples, project_info, order_date, contacts_record_id=None):
     """Create an MB Samples activity in Method CRM."""
     headers = get_headers(content_type=True)
@@ -203,6 +231,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
     """
     results = {
         'leads_processed': 0,
+        'contacts_created': 0,
         'activities_created': 0,
         'followups_created': 0,
         'existing_updated': 0,
@@ -266,10 +295,35 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
 
         order_date = lead_row['Order Date'].strftime('%Y-%m-%d') if pd.notna(lead_row['Order Date']) else datetime.now().strftime('%Y-%m-%d')
 
-        # Get contact record ID if exists
+        # Get contact record ID if exists, or create new contact
         contacts_record_id = None
         if email in existing_contacts:
             contacts_record_id = existing_contacts[email]['RecordID']
+        else:
+            # Create new contact first
+            first_name = lead_row['First Name']
+            last_name = lead_row['Last Name']
+            phone = lead_row.get('Work Phone', '') or ''
+            mobile = lead_row.get('Mobile Phone', '') or ''
+
+            new_contact_id, contact_error = create_contact(
+                first_name=first_name,
+                last_name=last_name,
+                company=company,
+                email=email,
+                phone=phone if pd.notna(phone) else None,
+                mobile=mobile if pd.notna(mobile) else None
+            )
+
+            if new_contact_id:
+                contacts_record_id = new_contact_id
+                results['contacts_created'] += 1
+                # Add to existing_contacts so we don't try to create again
+                existing_contacts[email] = {'RecordID': new_contact_id}
+            else:
+                results['errors'].append(f"Contact creation failed for {contact_name}: {contact_error}")
+
+            time.sleep(0.3)  # Rate limiting
 
         # Create MB Samples activity for ALL leads
         activity_id, error = create_activity(
@@ -306,7 +360,9 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
                 'company': company,
                 'samples': len(samples),
                 'activity_id': activity_id,
-                'is_existing': is_existing
+                'contact_id': contacts_record_id,
+                'is_existing': is_existing,
+                'is_new_contact': not is_existing
             })
         else:
             results['errors'].append(f"Activity failed for {contact_name}: {error}")
@@ -315,4 +371,157 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         time.sleep(0.3)  # Rate limiting
 
     update_progress("Complete!", 100)
+    return results
+
+
+def fetch_orphaned_activities():
+    """Fetch MB Samples activities that have no linked contact."""
+    headers = get_headers()
+    orphaned = []
+    skip = 0
+
+    while True:
+        r = requests.get(
+            f'{BASE_URL}/tables/Activity?$filter=ActivityType_RecordID eq 22&skip={skip}&top=100',
+            headers=headers
+        )
+        if r.status_code == 429:
+            time.sleep(30)
+            continue
+        if r.status_code != 200:
+            break
+
+        batch = r.json().get('value', [])
+        if not batch:
+            break
+
+        for act in batch:
+            if not act.get('Contacts_RecordID'):
+                orphaned.append(act)
+
+        skip += 100
+        time.sleep(0.15)
+
+    return orphaned
+
+
+def update_activity_contact(activity_id, contacts_record_id):
+    """Update an activity to link it to a contact."""
+    headers = get_headers(content_type=True)
+
+    update_data = {
+        'Contacts_RecordID': contacts_record_id
+    }
+
+    r = requests.patch(f'{BASE_URL}/tables/Activity/{activity_id}', headers=headers, json=update_data)
+
+    if r.status_code in (200, 204):
+        return True, None
+    return False, f"API {r.status_code}: {r.text[:200]}"
+
+
+def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None):
+    """
+    Find orphaned MB Samples activities and link them to contacts.
+    Creates contacts if they don't exist.
+
+    Args:
+        existing_contacts: Dict of email -> contact info (optional, will fetch if None)
+        progress_callback: Function to call with progress updates (msg, pct)
+
+    Returns:
+        Dict with results and stats
+    """
+    results = {
+        'orphaned_found': 0,
+        'activities_linked': 0,
+        'contacts_created': 0,
+        'skipped_no_email': 0,
+        'errors': [],
+        'details': []
+    }
+
+    def update_progress(msg, pct=None):
+        if progress_callback:
+            progress_callback(msg, pct)
+
+    # Load existing contacts if not provided
+    if existing_contacts is None:
+        update_progress("Loading existing contacts from Method...", 0)
+        existing_contacts = load_existing_contacts()
+
+    # Fetch orphaned activities
+    update_progress("Fetching orphaned activities...", 10)
+    orphaned = fetch_orphaned_activities()
+    results['orphaned_found'] = len(orphaned)
+
+    if not orphaned:
+        update_progress("No orphaned activities found!", 100)
+        return results
+
+    update_progress(f"Found {len(orphaned)} orphaned activities", 15)
+
+    # Process each orphaned activity
+    for idx, activity in enumerate(orphaned):
+        pct = 20 + int(75 * idx / len(orphaned))
+        activity_id = activity['RecordID']
+        contact_name = activity.get('ContactName', 'Unknown')
+        contact_email = (activity.get('ContactEmail') or '').lower().strip()
+        company = activity.get('ActivityCompanyName', '')
+
+        update_progress(f"Processing {contact_name}...", pct)
+
+        if not contact_email:
+            results['skipped_no_email'] += 1
+            results['errors'].append(f"Activity #{activity_id}: No email address")
+            continue
+
+        # Check if contact exists
+        contacts_record_id = None
+        is_new = False
+
+        if contact_email in existing_contacts:
+            contacts_record_id = existing_contacts[contact_email]['RecordID']
+        else:
+            # Create new contact
+            name_parts = contact_name.split(' ', 1)
+            first_name = name_parts[0] if name_parts else ''
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+            new_contact_id, contact_error = create_contact(
+                first_name=first_name,
+                last_name=last_name,
+                company=company,
+                email=contact_email
+            )
+
+            if new_contact_id:
+                contacts_record_id = new_contact_id
+                results['contacts_created'] += 1
+                existing_contacts[contact_email] = {'RecordID': new_contact_id}
+                is_new = True
+            else:
+                results['errors'].append(f"Activity #{activity_id}: Failed to create contact - {contact_error}")
+                continue
+
+            time.sleep(0.3)
+
+        # Update activity to link to contact
+        success, error = update_activity_contact(activity_id, contacts_record_id)
+
+        if success:
+            results['activities_linked'] += 1
+            results['details'].append({
+                'activity_id': activity_id,
+                'contact_name': contact_name,
+                'contact_email': contact_email,
+                'contact_id': contacts_record_id,
+                'is_new_contact': is_new
+            })
+        else:
+            results['errors'].append(f"Activity #{activity_id}: Failed to link - {error}")
+
+        time.sleep(0.3)
+
+    update_progress("Cleanup complete!", 100)
     return results
