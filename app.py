@@ -57,6 +57,10 @@ TOOL_CATEGORIES = {
             "Order Payment Matcher": {
                 "description": "Match orders to payment transactions",
                 "permission": "admin"
+            },
+            "QuickBooks Billing": {
+                "description": "Copy/paste assistant for QuickBooks invoice entry",
+                "permission": "admin"
             }
         }
     },
@@ -534,6 +538,221 @@ elif tool == "Order Payment Matcher":
                         st.error(f"Error: {e}")
                         import traceback
                         st.text(traceback.format_exc())
+
+
+elif tool == "QuickBooks Billing":
+    st.header("💰 QuickBooks Billing Assistant")
+    st.markdown("Get order details with payment info for manual QuickBooks entry. Combines order data with Stripe/PayPal payment matching.")
+
+    from quickbooks_billing_helper import (
+        get_billing_data, generate_qb_entry_text,
+        generate_tab_separated_summary, generate_line_items_table
+    )
+
+    # Date range for payment matching
+    st.subheader("1. Payment Date Range")
+    st.caption("Used to fetch Stripe/PayPal transactions for matching")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        qb_start_date = st.date_input(
+            "Start Date",
+            value=datetime.now() - timedelta(days=30),
+            key="qb_billing_start"
+        )
+    with col2:
+        qb_end_date = st.date_input(
+            "End Date",
+            value=datetime.now(),
+            key="qb_billing_end"
+        )
+
+    # Order numbers input
+    st.subheader("2. Order Numbers")
+    qb_order_input = st.text_area(
+        "Enter order numbers (one per line or comma-separated)",
+        height=120,
+        placeholder="12345\n12346\n12347",
+        key="qb_order_numbers"
+    )
+
+    if st.button("Get Billing Data", type="primary", key="qb_fetch"):
+        # Parse order numbers
+        order_numbers = []
+        if qb_order_input:
+            for line in qb_order_input.strip().split('\n'):
+                for num in line.split(','):
+                    num = num.strip()
+                    if num:
+                        order_numbers.append(num)
+
+        if not order_numbers:
+            st.error("Please enter at least one order number")
+        else:
+            ss_api_key = get_secret("SQUARESPACE_API_KEY")
+            if not ss_api_key:
+                st.error("SQUARESPACE_API_KEY not configured")
+            else:
+                with st.spinner(f"Fetching {len(order_numbers)} orders and matching payments..."):
+                    try:
+                        # Fetch payment transactions
+                        start_str = qb_start_date.strftime("%Y-%m-%d")
+                        end_str = qb_end_date.strftime("%Y-%m-%d")
+
+                        stripe_txns = fetch_stripe_readonly(start_str, end_str)
+                        paypal_txns = fetch_paypal_readonly(start_str, end_str)
+
+                        # Get billing data
+                        orders, summary = get_billing_data(
+                            order_numbers,
+                            ss_api_key,
+                            stripe_txns,
+                            paypal_txns
+                        )
+
+                        # Store in session
+                        st.session_state['qb_orders'] = orders
+                        st.session_state['qb_summary'] = summary
+
+                        user_email = st.session_state.get("user_email", "local")
+                        log_activity(user_email, "QuickBooks Billing", "fetch", f"{len(order_numbers)} orders")
+
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                        import traceback
+                        st.text(traceback.format_exc())
+
+    # Display results
+    if 'qb_orders' in st.session_state and st.session_state['qb_orders']:
+        orders = st.session_state['qb_orders']
+        summary = st.session_state['qb_summary']
+
+        st.divider()
+        st.subheader("3. Results")
+
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Orders Found", summary['total_orders'])
+        with col2:
+            st.metric("Payments Matched", summary['matched_payments'])
+        with col3:
+            st.metric("Total Gross", f"${summary['total_gross']:,.2f}")
+        with col4:
+            st.metric("Total Net", f"${summary['total_net']:,.2f}")
+
+        if summary['not_found']:
+            st.warning(f"Orders not found: {', '.join(summary['not_found'])}")
+
+        # Tabs for different views
+        tab1, tab2, tab3 = st.tabs(["Summary Table", "Line Items", "Detailed View"])
+
+        with tab1:
+            st.markdown("**Copy this table to Excel/Sheets:**")
+            summary_table = generate_tab_separated_summary(orders)
+
+            # Display as formatted table
+            st.text_area(
+                "Tab-separated data (select all and copy)",
+                value=summary_table,
+                height=200,
+                key="qb_summary_table"
+            )
+
+            st.download_button(
+                label="Download as CSV",
+                data=summary_table.replace('\t', ','),
+                file_name=f"qb_billing_summary_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                mime="text/csv"
+            )
+
+        with tab2:
+            st.markdown("**All line items with quantities and prices:**")
+            line_items_table = generate_line_items_table(orders)
+
+            st.text_area(
+                "Tab-separated line items (select all and copy)",
+                value=line_items_table,
+                height=300,
+                key="qb_line_items"
+            )
+
+            st.download_button(
+                label="Download Line Items CSV",
+                data=line_items_table.replace('\t', ','),
+                file_name=f"qb_line_items_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                mime="text/csv"
+            )
+
+        with tab3:
+            st.markdown("**Detailed order information for manual entry:**")
+
+            for order in orders:
+                with st.expander(f"Order #{order['order_number']} - {order['customer_name']} - ${order['grand_total']:.2f}"):
+                    # Quick copy fields
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Customer", order['customer_name'], key=f"cust_{order['order_number']}")
+                        st.text_input("Date", order['order_date'], key=f"date_{order['order_number']}")
+                        st.text_input("Total", f"${order['grand_total']:.2f}", key=f"total_{order['order_number']}")
+                    with col2:
+                        st.text_input("Tax Code", "Tax" if order['is_taxable'] else "Non", key=f"tax_{order['order_number']}")
+                        if order.get('payment_matched'):
+                            st.text_input("Net", f"${order['net_amount']:.2f}", key=f"net_{order['order_number']}")
+                            st.text_input("Fee", f"${order['processing_fee']:.2f}", key=f"fee_{order['order_number']}")
+
+                    # Ship to address
+                    ship_addr = order['shipping_address']
+                    ship_text = f"{ship_addr.get('name', '')}\n{ship_addr.get('line1', '')}"
+                    if ship_addr.get('line2'):
+                        ship_text += f"\n{ship_addr['line2']}"
+                    ship_text += f"\n{ship_addr.get('city', '')}, {ship_addr.get('state', '')} {ship_addr.get('zip', '')}"
+                    st.text_area("Ship To", ship_text, height=100, key=f"ship_{order['order_number']}")
+
+                    # Line items
+                    st.markdown("**Line Items:**")
+                    for i, item in enumerate(order['line_items']):
+                        cols = st.columns([3, 1, 1, 1])
+                        with cols[0]:
+                            st.text(item['description'][:50])
+                        with cols[1]:
+                            st.text(f"Qty: {item['quantity']}")
+                        with cols[2]:
+                            st.text(f"${item['unit_price']:.2f}")
+                        with cols[3]:
+                            st.text(f"${item['line_total']:.2f}")
+
+                    # Totals
+                    st.markdown("---")
+                    cols = st.columns(4)
+                    with cols[0]:
+                        st.metric("Subtotal", f"${order['subtotal']:.2f}")
+                    with cols[1]:
+                        st.metric("Shipping", f"${order['shipping_total']:.2f}")
+                    with cols[2]:
+                        st.metric("Tax", f"${order['tax_total']:.2f}")
+                    with cols[3]:
+                        st.metric("Total", f"${order['grand_total']:.2f}")
+
+        # Processing fees summary
+        st.divider()
+        st.subheader("4. Processing Fees Summary")
+        st.markdown("Record these as expenses in QuickBooks:")
+
+        fees_by_source = {}
+        for order in orders:
+            if order.get('payment_matched') and order.get('processing_fee'):
+                source = order['payment_source']
+                if source not in fees_by_source:
+                    fees_by_source[source] = 0
+                fees_by_source[source] += order['processing_fee']
+
+        if fees_by_source:
+            for source, total_fee in fees_by_source.items():
+                st.info(f"**{source}** processing fees: **${total_fee:.2f}**")
+            st.caption("Debit: Processing Fees Expense | Credit: Checking Account (or wherever payment was deposited)")
+        else:
+            st.info("No payment matches found - fees not calculated")
 
 
 # =============================================================================
