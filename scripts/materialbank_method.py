@@ -34,6 +34,67 @@ def get_headers(content_type=False):
 BASE_URL = 'https://rest.method.me/api/v1'
 
 
+def api_request_with_retry(method, url, headers, json=None, max_retries=3, retry_callback=None):
+    """
+    Make API request with tiered retry on rate limiting or connection errors.
+
+    Retry strategy:
+    - 1st retry: wait 3 seconds
+    - 2nd retry: wait 60 seconds
+    - 3rd retry: wait 60 seconds
+
+    Args:
+        method: HTTP method (GET, POST, PATCH, DELETE)
+        url: Request URL
+        headers: Request headers
+        json: JSON body for POST/PATCH
+        max_retries: Maximum number of retry attempts
+        retry_callback: Optional function(attempt, wait_seconds, reason) for UI updates
+
+    Returns:
+        Response object or None if all retries failed
+    """
+    retry_delays = [3, 60, 60]  # Seconds to wait for each retry attempt
+
+    for attempt in range(max_retries):
+        try:
+            if method == 'POST':
+                r = requests.post(url, headers=headers, json=json, timeout=30)
+            elif method == 'GET':
+                r = requests.get(url, headers=headers, timeout=30)
+            elif method == 'DELETE':
+                r = requests.delete(url, headers=headers, timeout=30)
+            elif method == 'PATCH':
+                r = requests.patch(url, headers=headers, json=json, timeout=30)
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            # Handle rate limiting (429)
+            if r.status_code == 429:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delays[min(attempt, len(retry_delays) - 1)]
+                    if retry_callback:
+                        retry_callback(attempt + 1, wait_time, "rate_limit")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    return r  # Return the 429 response if all retries exhausted
+
+            return r
+
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            if attempt < max_retries - 1:
+                wait_time = retry_delays[min(attempt, len(retry_delays) - 1)]
+                if retry_callback:
+                    retry_callback(attempt + 1, wait_time, "connection_error")
+                time.sleep(wait_time)
+            else:
+                # Return None instead of raising to allow graceful handling
+                return None
+
+    return None
+
+
 def extract_email_from_text(text):
     """Extract email from text that may contain other info."""
     if pd.isna(text):
@@ -125,88 +186,122 @@ def convert_materialbank_to_method(df, existing_emails=None):
     return method_df, stats
 
 
-def create_contact(first_name, last_name, company, email, phone=None, mobile=None):
+def create_customer(company, first_name, last_name, email, phone=None, mobile=None, retry_callback=None):
     """
-    Create a new lead in Method CRM.
+    Create a new Customer record in Method CRM.
 
-    Creates a Customer (with IsLeadStatusOnly=True) and a linked Contact.
-    Returns the Contact RecordID for activity linking.
+    Returns tuple of (customer_record_id, error)
     """
     headers = get_headers(content_type=True)
 
-    # Build the name - use company if provided, otherwise use person name
-    if company:
-        name = company
-    else:
-        name = f"{first_name} {last_name}".strip()
+    contact_name = f"{first_name} {last_name}".strip()
+    customer_name = company or contact_name
 
-    # Step 1: Create Customer as a lead
-    lead_data = {
-        'Name': name,
+    customer_data = {
+        'Name': customer_name,
+        'CompanyName': customer_name,
+        'FullName': customer_name,
         'FirstName': first_name,
         'LastName': last_name,
-        'CompanyName': company or '',
         'Email': email,
-        'IsLeadStatusOnly': True,  # This makes it a lead, not a customer
+        'Contact': contact_name,
+        'EntityType': 'Customer Lead',
+        'IsActive': True,
+        'IsLeadStatusOnly': True,
         'LeadStatus_RecordID': 2,  # Open
-        'LeadSource_RecordID': 14,  # Material Bank
         'LeadRating_RecordID': 2,  # Warm
-        'SalesRep_RecordID': 3,  # Laura Ablan (LA)
+        'LeadSource_RecordID': 14, # Material Bank
+        'SalesRep_RecordID': 1,    # LA (Laura Ablan)
     }
 
     if phone:
-        lead_data['Phone'] = phone
+        customer_data['Phone'] = phone
     if mobile:
-        lead_data['Mobile'] = mobile
+        customer_data['Mobile'] = mobile
 
-    # Retry logic for rate limiting
-    for attempt in range(3):
-        r = requests.post(f'{BASE_URL}/tables/Customer', headers=headers, json=lead_data)
+    r = api_request_with_retry('POST', f'{BASE_URL}/tables/Customer', headers=headers, json=customer_data, retry_callback=retry_callback)
 
-        if r.status_code == 429:
-            time.sleep(30)  # Wait 30 seconds on rate limit
-            continue
-        break
+    if r and r.status_code == 201:
+        return int(r.text), None
+    return None, f"API {r.status_code if r else 'No response'}: {r.text[:200] if r else 'Connection failed'}"
 
-    if r.status_code != 201:
-        error_text = r.text[:200] if r.text else 'No response'
-        # Check for duplicate error
-        if r.status_code == 400 and 'duplicate' in error_text.lower():
-            return None, f"Duplicate customer: {email}"
-        return None, f"Customer API {r.status_code}: {error_text}"
 
-    customer_id = int(r.text)
+def create_contact(first_name, last_name, email, company, phone=None, mobile=None, entity_record_id=None):
+    """
+    Create a new Contact record in Method CRM, optionally linked to a Customer.
 
-    time.sleep(0.5)  # Rate limiting between customer and contact creation
+    Args:
+        first_name, last_name, email, company: Contact details
+        phone, mobile: Optional phone numbers
+        entity_record_id: Customer RecordID to link this contact to (Entity_RecordID)
 
-    # Step 2: Create Contact linked to this Customer
+    Returns tuple of (contact_record_id, error)
+    """
+    headers = get_headers(content_type=True)
+
     contact_data = {
         'FirstName': first_name,
         'LastName': last_name,
+        'Name': f"{first_name} {last_name}".strip(),
         'Email': email,
-        'Entity_RecordID': customer_id,
+        'CompanyName': company,
+        'TagList': 'Arazzo',
     }
+
+    # Link to Customer if provided
+    if entity_record_id:
+        contact_data['Entity_RecordID'] = entity_record_id
+        contact_data['Entity'] = company
+        contact_data['EntityType'] = 'Customer'
 
     if phone:
         contact_data['Phone'] = phone
     if mobile:
         contact_data['Mobile'] = mobile
 
-    for attempt in range(3):
-        r = requests.post(f'{BASE_URL}/tables/Contacts', headers=headers, json=contact_data)
+    r = api_request_with_retry('POST', f'{BASE_URL}/tables/Contacts', headers=headers, json=contact_data)
 
-        if r.status_code == 429:
-            time.sleep(30)
-            continue
-        break
+    if r and r.status_code == 201:
+        return int(r.text), None
+    return None, f"API {r.status_code if r else 'No response'}: {r.text[:200] if r else 'Connection failed'}"
 
-    if r.status_code == 201:
-        contact_id = int(r.text)
-        return contact_id, None
-    else:
-        # Customer was created but Contact failed - still return customer_id
-        # Activities can still reference by name/email even without Contact link
-        return customer_id, f"Contact API {r.status_code}: {r.text[:200]} (Customer #{customer_id} created)"
+
+def create_lead(first_name, last_name, email, company, phone=None, mobile=None):
+    """
+    Create a complete lead: Customer record + Contact record linked together.
+
+    Returns tuple of (contact_record_id, customer_record_id, error)
+    """
+    # Step 1: Create Customer record
+    customer_id, error = create_customer(
+        company=company,
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        phone=phone,
+        mobile=mobile
+    )
+
+    if not customer_id:
+        return None, None, f"Customer creation failed: {error}"
+
+    time.sleep(0.3)  # Small delay between API calls
+
+    # Step 2: Create Contact record linked to Customer
+    contact_id, error = create_contact(
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        company=company,
+        phone=phone,
+        mobile=mobile,
+        entity_record_id=customer_id
+    )
+
+    if not contact_id:
+        return None, customer_id, f"Contact creation failed (Customer #{customer_id} created): {error}"
+
+    return contact_id, customer_id, None
 
 
 def create_activity(contact_name, contact_email, company, samples, project_info, order_date, contacts_record_id=None):
@@ -238,19 +333,12 @@ def create_activity(contact_name, contact_email, company, samples, project_info,
     if contacts_record_id:
         activity_data['Contacts_RecordID'] = contacts_record_id
 
-    # Retry logic for rate limiting
-    for attempt in range(3):
-        r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=activity_data)
+    r = api_request_with_retry('POST', f'{BASE_URL}/tables/Activity', headers=headers, json=activity_data)
 
-        if r.status_code == 429:
-            time.sleep(30)
-            continue
-        break
-
-    if r.status_code == 201:
+    if r and r.status_code == 201:
         return int(r.text), None
     # Return error for logging
-    return None, f"API {r.status_code}: {r.text[:200]}"
+    return None, f"API {r.status_code if r else 'No response'}: {r.text[:200] if r else 'Connection failed'}"
 
 
 def create_followup_activity(parent_activity_id, contact_name, contact_email, contacts_record_id, days_out=7):
@@ -270,43 +358,39 @@ def create_followup_activity(parent_activity_id, contact_name, contact_email, co
         'FollowUpFromActivityNo_RecordID': parent_activity_id,
     }
 
-    # Retry logic for rate limiting
-    for attempt in range(3):
-        r = requests.post(f'{BASE_URL}/tables/Activity', headers=headers, json=followup_data)
+    r = api_request_with_retry('POST', f'{BASE_URL}/tables/Activity', headers=headers, json=followup_data)
 
-        if r.status_code == 429:
-            time.sleep(30)
-            continue
-        break
-
-    if r.status_code == 201:
+    if r and r.status_code == 201:
         return int(r.text), None
-    return None, f"API {r.status_code}: {r.text[:200]}"
+    return None, f"API {r.status_code if r else 'No response'}: {r.text[:200] if r else 'Connection failed'}"
 
 
-def process_materialbank_import(mb_df, existing_contacts=None, progress_callback=None):
+def process_materialbank_import(mb_df, existing_contacts=None, progress_callback=None, dry_run=False):
     """
-    Full pipeline: Convert MB data, create activities, and follow-ups.
+    Full pipeline: Convert MB data, create contacts, activities, and follow-ups.
 
-    Creates MB Samples activities for ALL leads (including existing contacts).
-    Only creates Intro EMAIL follow-up for NEW contacts.
+    For NEW leads: Creates Contact first, then MB Samples activity, then follow-up.
+    For EXISTING leads: Creates MB Samples activity linked to existing contact, then follow-up.
 
     Args:
         mb_df: Material Bank DataFrame
         existing_contacts: Dict of email -> contact info (optional, will fetch if None)
         progress_callback: Function to call with progress updates (msg, pct)
+        dry_run: If True, only report what would be done without making changes
 
     Returns:
         Dict with results and stats
     """
     results = {
         'leads_processed': 0,
+        'customers_created': 0,
         'contacts_created': 0,
         'activities_created': 0,
         'followups_created': 0,
         'existing_updated': 0,
         'errors': [],
-        'details': []
+        'details': [],
+        'dry_run': dry_run
     }
 
     def update_progress(msg, pct=None):
@@ -367,52 +451,81 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
 
         # Get contact record ID if exists, or create new contact
         contacts_record_id = None
+        contact_created = False
+
         if email in existing_contacts:
             contacts_record_id = existing_contacts[email]['RecordID']
         else:
-            # Create new contact first
-            first_name = lead_row['First Name']
-            last_name = lead_row['Last Name']
-            phone = lead_row.get('Work Phone', '') or ''
-            mobile = lead_row.get('Mobile Phone', '') or ''
+            # NEW LEAD: Create Customer + Contact (linked together)
+            first_name = lead_row.get('First Name', '')
+            last_name = lead_row.get('Last Name', '')
+            phone = lead_row.get('Work Phone', None)
+            mobile = lead_row.get('Mobile Phone', None)
 
-            new_contact_id, contact_error = create_contact(
-                first_name=first_name,
-                last_name=last_name,
-                company=company,
-                email=email,
-                phone=phone if pd.notna(phone) else None,
-                mobile=mobile if pd.notna(mobile) else None
-            )
-
-            if new_contact_id:
-                contacts_record_id = new_contact_id
+            if dry_run:
+                # In dry run, simulate lead creation
+                results['customers_created'] += 1
                 results['contacts_created'] += 1
-                # Add to existing_contacts so we don't try to create again
-                existing_contacts[email] = {'RecordID': new_contact_id}
+                contacts_record_id = -1  # Placeholder for dry run
+                contact_created = True
             else:
-                results['errors'].append(f"Contact creation failed for {contact_name}: {contact_error}")
+                contact_id, customer_id, lead_error = create_lead(
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    company=company,
+                    phone=phone if pd.notna(phone) else None,
+                    mobile=mobile if pd.notna(mobile) else None
+                )
 
-            time.sleep(1)  # Rate limiting - 1 second between lead creations
+                if customer_id:
+                    results['customers_created'] += 1
 
-        # Create MB Samples activity for ALL leads
-        activity_id, error = create_activity(
-            contact_name=contact_name,
-            contact_email=email,
-            company=company,
-            samples=samples,
-            project_info=project_info,
-            order_date=order_date,
-            contacts_record_id=contacts_record_id
-        )
+                if contact_id:
+                    contacts_record_id = contact_id
+                    contact_created = True
+                    results['contacts_created'] += 1
+                    # Add to existing_contacts so duplicates in same batch are handled
+                    existing_contacts[email] = {
+                        'RecordID': contact_id,
+                        'Name': contact_name,
+                        'Entity_RecordID': customer_id,
+                    }
+                else:
+                    results['errors'].append(f"Lead creation failed for {contact_name}: {lead_error}")
+                    # Continue anyway - activity will be orphaned but we'll log the error
 
-        if activity_id:
+                time.sleep(0.5)  # Rate limiting for lead creation
+
+        # Create MB Samples activity
+        if dry_run:
+            activity_id = -1  # Placeholder for dry run
             results['activities_created'] += 1
             if is_existing:
                 results['existing_updated'] += 1
+        else:
+            activity_id, error = create_activity(
+                contact_name=contact_name,
+                contact_email=email,
+                company=company,
+                samples=samples,
+                project_info=project_info,
+                order_date=order_date,
+                contacts_record_id=contacts_record_id
+            )
 
-            # Always create follow-up (parallel workflows allowed for new sample orders)
-            if contacts_record_id:
+            if activity_id:
+                results['activities_created'] += 1
+                if is_existing:
+                    results['existing_updated'] += 1
+            else:
+                results['errors'].append(f"Activity failed for {contact_name}: {error}")
+
+        # Create follow-up activity (only if we have a contact)
+        if contacts_record_id and (dry_run or activity_id):
+            if dry_run:
+                results['followups_created'] += 1
+            else:
                 followup_id, followup_error = create_followup_activity(
                     parent_activity_id=activity_id,
                     contact_name=contact_name,
@@ -424,85 +537,146 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
                 elif followup_error:
                     results['errors'].append(f"Follow-up failed for {contact_name}: {followup_error}")
 
-            results['details'].append({
-                'name': contact_name,
-                'email': email,
-                'company': company,
-                'samples': len(samples),
-                'activity_id': activity_id,
-                'contact_id': contacts_record_id,
-                'is_existing': is_existing,
-                'is_new_contact': not is_existing
-            })
-        else:
-            results['errors'].append(f"Activity failed for {contact_name}: {error}")
+        results['details'].append({
+            'name': contact_name,
+            'email': email,
+            'company': company,
+            'samples': len(samples),
+            'activity_id': activity_id if not dry_run else None,
+            'contact_id': contacts_record_id if not dry_run else None,
+            'is_existing': is_existing,
+            'contact_created': contact_created
+        })
 
         results['leads_processed'] += 1
-        time.sleep(1)  # Rate limiting - 1 second between leads
+        time.sleep(0.3)  # Rate limiting
 
     update_progress("Complete!", 100)
     return results
 
 
-def fetch_orphaned_activities():
-    """Fetch MB Samples activities that have no linked contact."""
-    headers = get_headers()
-    orphaned = []
-    skip = 0
+def process_activities_only(mb_df, existing_contacts, progress_callback=None, dry_run=False):
+    """
+    Create activities for leads that already have contacts in Method.
+    Use this after importing contacts via CSV.
 
-    while True:
-        r = requests.get(
-            f'{BASE_URL}/tables/Activity?$filter=ActivityType_RecordID eq 22&skip={skip}&top=100',
-            headers=headers
-        )
-        if r.status_code == 429:
-            time.sleep(30)
-            continue
-        if r.status_code != 200:
-            break
+    Args:
+        mb_df: Material Bank DataFrame
+        existing_contacts: Dict of email -> contact info
+        progress_callback: Function for progress updates
+        dry_run: If True, only report what would be done
 
-        batch = r.json().get('value', [])
-        if not batch:
-            break
-
-        for act in batch:
-            if not act.get('Contacts_RecordID'):
-                orphaned.append(act)
-
-        skip += 100
-        time.sleep(0.15)
-
-    return orphaned
-
-
-def update_activity_contact(activity_id, contacts_record_id):
-    """Update an activity to link it to a contact."""
-    headers = get_headers(content_type=True)
-
-    update_data = {
-        'Contacts_RecordID': contacts_record_id
+    Returns:
+        Dict with results
+    """
+    results = {
+        'activities_created': 0,
+        'followups_created': 0,
+        'skipped': 0,
+        'skipped_details': [],
+        'errors': [],
+        'details': [],
+        'dry_run': dry_run
     }
 
-    r = requests.patch(f'{BASE_URL}/tables/Activity/{activity_id}', headers=headers, json=update_data)
+    def update_progress(msg, pct=None):
+        if progress_callback:
+            progress_callback(msg, pct)
 
-    if r.status_code in (200, 204):
-        return True, None
-    return False, f"API {r.status_code}: {r.text[:200]}"
+    # Prepare data
+    mb_df = mb_df.copy()
+    mb_df['Order Date'] = pd.to_datetime(mb_df['Order Date'], format='mixed', dayfirst=False)
+    mb_df['Email_Lower'] = mb_df['Email'].str.lower().str.strip()
+
+    unique_emails = mb_df['Email_Lower'].unique()
+    total = len(unique_emails)
+
+    for idx, email in enumerate(unique_emails):
+        pct = int(100 * idx / total) if total > 0 else 100
+        update_progress(f"Processing {idx+1}/{total}...", pct)
+
+        group = mb_df[mb_df['Email_Lower'] == email]
+        lead_row = group.iloc[0]
+        contact_name = f"{lead_row['First Name']} {lead_row['Last Name']}"
+        company = lead_row['Company']
+
+        # Check if contact exists
+        if email not in existing_contacts:
+            results['skipped'] += 1
+            results['skipped_details'].append({
+                'name': contact_name,
+                'email': email,
+                'company': company
+            })
+            continue
+
+        contacts_record_id = existing_contacts[email]['RecordID']
+
+        # Collect samples
+        samples = []
+        for _, row in group.iterrows():
+            sample = f"{row['Name']} {row['Color']}".strip()
+            if sample and sample not in samples:
+                samples.append(sample)
+
+        project_info = {
+            'name': lead_row.get('Project Name', ''),
+            'type': lead_row.get('Project Type', ''),
+            'budget': lead_row.get('Project Budget', ''),
+            'phase': lead_row.get('Project Phase', ''),
+        }
+
+        order_date = lead_row['Order Date'].strftime('%Y-%m-%d') if pd.notna(lead_row['Order Date']) else datetime.now().strftime('%Y-%m-%d')
+
+        if dry_run:
+            results['activities_created'] += 1
+            results['followups_created'] += 1
+        else:
+            # Create activity
+            activity_id, error = create_activity(
+                contact_name=contact_name,
+                contact_email=email,
+                company=company,
+                samples=samples,
+                project_info=project_info,
+                order_date=order_date,
+                contacts_record_id=contacts_record_id
+            )
+
+            if activity_id:
+                results['activities_created'] += 1
+
+                # Create follow-up
+                followup_id, _ = create_followup_activity(
+                    parent_activity_id=activity_id,
+                    contact_name=contact_name,
+                    contact_email=email,
+                    contacts_record_id=contacts_record_id
+                )
+                if followup_id:
+                    results['followups_created'] += 1
+            else:
+                results['errors'].append(f"Activity failed for {contact_name}: {error}")
+
+            time.sleep(0.3)
+
+        results['details'].append({
+            'name': contact_name,
+            'email': email,
+            'company': company,
+            'samples': len(samples)
+        })
+
+    update_progress("Complete!", 100)
+    return results
 
 
-def delete_activity(activity_id):
-    """Delete an activity from Method CRM."""
-    headers = get_headers()
-
-    r = requests.delete(f'{BASE_URL}/tables/Activity/{activity_id}', headers=headers)
-
-    if r.status_code in (200, 204):
-        return True, None
-    return False, f"API {r.status_code}: {r.text[:200]}"
-
+# =============================================================================
+# Cleanup Functions - for fixing orphaned/duplicate activities from failed imports
+# =============================================================================
 
 def fetch_all_mb_activities():
-    """Fetch ALL MB Samples activities."""
+    """Fetch all MB Samples activities."""
     headers = get_headers()
     all_activities = []
     skip = 0
@@ -532,7 +706,7 @@ def fetch_all_mb_activities():
 def find_duplicate_activities(activities):
     """
     Find duplicate MB Samples activities (same email + same date).
-    Returns list of activity IDs to delete (keeps the one with highest RecordID).
+    Returns list of activities to delete (keeps the one with highest RecordID).
     """
     from collections import defaultdict
 
@@ -541,182 +715,370 @@ def find_duplicate_activities(activities):
     for act in activities:
         email = (act.get('ContactEmail') or '').lower().strip()
         due_date = act.get('DueDateStart', '')
-
         if email:
             key = f"{email}|{due_date}"
             by_email_date[key].append(act)
 
     duplicates_to_delete = []
-    duplicate_groups = []
-
     for key, acts in by_email_date.items():
         if len(acts) > 1:
-            # Sort by RecordID descending, keep the highest (most recent)
             sorted_acts = sorted(acts, key=lambda x: x['RecordID'], reverse=True)
-            keep = sorted_acts[0]
-            delete = sorted_acts[1:]
+            duplicates_to_delete.extend(sorted_acts[1:])  # Keep highest ID, delete rest
 
-            for act in delete:
-                duplicates_to_delete.append(act)
-                duplicate_groups.append({
-                    'keep_id': keep['RecordID'],
-                    'delete_id': act['RecordID'],
-                    'email': act.get('ContactEmail', ''),
-                    'name': act.get('ContactName', ''),
-                    'date': act.get('DueDateStart', '')
-                })
-
-    return duplicates_to_delete, duplicate_groups
+    return duplicates_to_delete
 
 
-def cleanup_orphaned_activities(existing_contacts=None, progress_callback=None, remove_duplicates=True, target_emails=None):
+def delete_activity(activity_id):
+    """Delete an activity."""
+    headers = get_headers()
+    r = requests.delete(f'{BASE_URL}/tables/Activity/{activity_id}', headers=headers)
+    if r.status_code in (200, 204):
+        return True, None
+    return False, f"API {r.status_code}: {r.text[:200]}"
+
+
+def update_activity_contact(activity_id, contacts_record_id):
+    """Link an activity to a contact."""
+    headers = get_headers(content_type=True)
+    r = requests.patch(
+        f'{BASE_URL}/tables/Activity/{activity_id}',
+        headers=headers,
+        json={'Contacts_RecordID': contacts_record_id}
+    )
+    if r.status_code in (200, 204):
+        return True, None
+    return False, f"API {r.status_code}: {r.text[:200]}"
+
+
+def get_contact_by_email(email):
     """
-    Find orphaned MB Samples activities and link them to contacts.
-    Creates contacts if they don't exist. Optionally removes duplicates.
+    Query a single contact by email. Returns contact dict or None.
+    Much more API-efficient than loading all contacts.
+    """
+    headers = get_headers()
+    email_lower = email.lower().strip()
+
+    # Method uses 'filter' not '$filter'
+    r = api_request_with_retry(
+        'GET',
+        f"{BASE_URL}/tables/Contacts?filter=Email eq '{email_lower}'",
+        headers=headers
+    )
+
+    if r and r.status_code == 200:
+        contacts = r.json().get('value', [])
+        if contacts:
+            c = contacts[0]
+            return {
+                'RecordID': c['RecordID'],
+                'Entity_RecordID': c.get('Entity_RecordID'),
+                'Entity': c.get('Entity'),
+                'Name': c.get('Name'),
+                'Email': c.get('Email'),
+                'FirstName': c.get('FirstName'),
+                'LastName': c.get('LastName'),
+                'CompanyName': c.get('CompanyName'),
+                'Phone': c.get('Phone'),
+                'Mobile': c.get('Mobile'),
+                'TagList': c.get('TagList'),
+            }
+    return None
+
+
+def fix_orphaned_contacts(progress_callback=None, target_emails=None, dry_run=False, csv_data=None, retry_callback=None):
+    """
+    Fix contacts that were created without Customer entities.
+
+    Method CRM auto-creates a Contact when you create a Customer, so we:
+    1. Create Customer (auto-creates Contact)
+    2. Update auto-created Contact with TagList and CSV data
+    3. Re-link any existing activities from orphan to new Contact
+    4. Delete the original orphan Contact
 
     Args:
-        existing_contacts: Dict of email -> contact info (optional, will fetch if None)
-        progress_callback: Function to call with progress updates (msg, pct)
-        remove_duplicates: If True, also remove duplicate activities (same email+date)
-        target_emails: Optional set of emails to filter activities (for targeted cleanup)
+        progress_callback: Function for progress updates (msg, pct)
+        target_emails: Required - set/list of emails to fix (queries only these, not all contacts)
+        dry_run: If True, only report what would be done
+        csv_data: Optional dict mapping email -> {company, first_name, last_name, phone, mobile}
+                  Used to enrich/correct contact data from the original CSV
+        retry_callback: Optional function(attempt, wait_seconds, reason) for retry notifications
 
     Returns:
-        Dict with results and stats
+        Dict with results
     """
     results = {
-        'orphaned_found': 0,
-        'activities_linked': 0,
+        'customers_created': 0,
         'contacts_created': 0,
-        'skipped_no_email': 0,
-        'duplicates_removed': 0,
+        'orphans_deleted': 0,
+        'activities_relinked': 0,
+        'already_linked': 0,
+        'not_found': 0,
         'errors': [],
-        'details': [],
-        'duplicates_deleted': []
+        'details': []
     }
 
     def update_progress(msg, pct=None):
         if progress_callback:
             progress_callback(msg, pct)
 
-    # Load existing contacts if not provided
-    if existing_contacts is None:
-        update_progress("Loading existing contacts from Method...", 0)
-        existing_contacts = load_existing_contacts()
+    if not target_emails:
+        results['errors'].append("target_emails is required to avoid loading all contacts")
+        return results
 
-    # Fetch ALL MB Samples activities for duplicate detection
-    update_progress("Fetching all MB Samples activities...", 5)
+    # Normalize emails
+    emails_to_check = [e.lower().strip() for e in target_emails]
+    # Deduplicate while preserving order
+    seen = set()
+    unique_emails = []
+    for e in emails_to_check:
+        if e not in seen:
+            seen.add(e)
+            unique_emails.append(e)
+
+    total = len(unique_emails)
+    update_progress(f"Checking {total} emails from CSV...", 0)
+
+    for idx, email in enumerate(unique_emails):
+        pct = int(100 * idx / total) if total > 0 else 100
+        update_progress(f"Processing {idx+1}/{total}: {email}...", pct)
+
+        # Query this specific contact (1 API call)
+        orphan_contact = get_contact_by_email(email)
+        time.sleep(0.2)  # Rate limiting
+
+        if not orphan_contact:
+            results['not_found'] += 1
+            results['details'].append({
+                'email': email,
+                'status': 'not_found_in_method'
+            })
+            continue
+
+        # Check if already linked to a customer
+        if orphan_contact.get('Entity_RecordID'):
+            results['already_linked'] += 1
+            results['details'].append({
+                'email': email,
+                'name': orphan_contact.get('Name'),
+                'contact_id': orphan_contact['RecordID'],
+                'customer_id': orphan_contact['Entity_RecordID'],
+                'status': 'already_linked'
+            })
+            continue
+
+        # This contact is orphaned - needs fixing
+        orphan_id = orphan_contact['RecordID']
+
+        # Get data from CSV if available, otherwise use contact data
+        if csv_data and email in csv_data:
+            csv_row = csv_data[email]
+            first_name = csv_row.get('first_name', '')
+            last_name = csv_row.get('last_name', '')
+            company = csv_row.get('company', '')
+            phone = csv_row.get('phone')
+            mobile = csv_row.get('mobile')
+        else:
+            first_name = orphan_contact.get('FirstName') or ''
+            last_name = orphan_contact.get('LastName') or ''
+            company = orphan_contact.get('CompanyName') or ''
+            phone = orphan_contact.get('Phone')
+            mobile = orphan_contact.get('Mobile')
+
+        # Fallback: parse name if not available
+        if not first_name and not last_name:
+            name_parts = (orphan_contact.get('Name') or '').split(' ', 1)
+            first_name = name_parts[0] if name_parts else ''
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+        if not company:
+            company = f"{first_name} {last_name}".strip() or email
+
+        contact_name = f"{first_name} {last_name}".strip()
+
+        if dry_run:
+            results['customers_created'] += 1
+            results['contacts_created'] += 1
+            results['orphans_deleted'] += 1
+            results['details'].append({
+                'email': email,
+                'name': contact_name,
+                'company': company,
+                'orphan_id': orphan_id,
+                'status': 'would_fix',
+                'dry_run': True
+            })
+            continue
+
+        # Step 1: Create Customer (Method auto-creates Contact)
+        customer_id, error = create_customer(
+            company=company,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+            mobile=mobile,
+            retry_callback=retry_callback
+        )
+
+        if not customer_id:
+            results['errors'].append(f"Failed to create customer for {contact_name}: {error}")
+            continue
+
+        results['customers_created'] += 1
+        time.sleep(0.3)
+
+        # Step 2: Find the auto-created Contact
+        headers = get_headers()
+        r = api_request_with_retry(
+            'GET',
+            f"{BASE_URL}/tables/Contacts?filter=Entity_RecordID eq {customer_id}",
+            headers=headers,
+            retry_callback=retry_callback
+        )
+
+        new_contact_id = None
+        if r and r.status_code == 200:
+            contacts = r.json().get('value', [])
+            if contacts:
+                new_contact_id = contacts[0]['RecordID']
+                results['contacts_created'] += 1
+
+        if not new_contact_id:
+            results['errors'].append(f"Could not find auto-created contact for {contact_name}")
+            continue
+
+        time.sleep(0.2)
+
+        # Step 3: Update auto-created Contact with TagList
+        headers_json = get_headers(content_type=True)
+        r = api_request_with_retry(
+            'PATCH',
+            f'{BASE_URL}/tables/Contacts/{new_contact_id}',
+            headers=headers_json,
+            json={'TagList': 'Arazzo'},
+            retry_callback=retry_callback
+        )
+        time.sleep(0.2)
+
+        # Step 4: Find and re-link activities from orphan to new contact
+        r = api_request_with_retry(
+            'GET',
+            f"{BASE_URL}/tables/Activity?filter=Contacts_RecordID eq {orphan_id}",
+            headers=headers,
+            retry_callback=retry_callback
+        )
+
+        if r and r.status_code == 200:
+            activities = r.json().get('value', [])
+            for act in activities:
+                r2 = api_request_with_retry(
+                    'PATCH',
+                    f"{BASE_URL}/tables/Activity/{act['RecordID']}",
+                    headers=headers_json,
+                    json={'Contacts_RecordID': new_contact_id},
+                    retry_callback=retry_callback
+                )
+                if r2 and r2.status_code in (200, 204):
+                    results['activities_relinked'] += 1
+                time.sleep(0.1)
+
+        time.sleep(0.2)
+
+        # Step 5: Delete the orphan contact
+        r = api_request_with_retry(
+            'DELETE',
+            f'{BASE_URL}/tables/Contacts/{orphan_id}',
+            headers=headers,
+            retry_callback=retry_callback
+        )
+        if r and r.status_code in (200, 204):
+            results['orphans_deleted'] += 1
+
+        results['details'].append({
+            'email': email,
+            'name': contact_name,
+            'company': company,
+            'orphan_id': orphan_id,
+            'new_contact_id': new_contact_id,
+            'customer_id': customer_id,
+            'status': 'fixed'
+        })
+
+        time.sleep(0.5)  # Rate limiting between contacts
+
+    update_progress("Done!", 100)
+    return results
+
+
+def cleanup_activities(progress_callback=None, target_emails=None):
+    """
+    Clean up MB Samples activities: remove duplicates and link orphans to contacts.
+
+    Args:
+        progress_callback: Function for progress updates (msg, pct)
+        target_emails: Optional set of emails to limit cleanup scope
+
+    Returns:
+        Dict with results
+    """
+    results = {
+        'duplicates_removed': 0,
+        'activities_linked': 0,
+        'errors': []
+    }
+
+    def update_progress(msg, pct=None):
+        if progress_callback:
+            progress_callback(msg, pct)
+
+    # Load existing contacts
+    update_progress("Loading contacts...", 0)
+    existing_contacts = load_existing_contacts()
+
+    # Fetch all MB activities
+    update_progress("Fetching activities...", 10)
     all_activities = fetch_all_mb_activities()
 
     # Filter by target emails if provided
     if target_emails:
-        target_emails_lower = {e.lower().strip() for e in target_emails}
-        all_activities = [a for a in all_activities if (a.get('ContactEmail') or '').lower().strip() in target_emails_lower]
-        update_progress(f"Filtered to {len(all_activities)} activities matching target emails", 7)
+        target_lower = {e.lower().strip() for e in target_emails}
+        all_activities = [a for a in all_activities
+                         if (a.get('ContactEmail') or '').lower().strip() in target_lower]
 
-    # Remove duplicates first if requested
-    if remove_duplicates:
-        update_progress("Checking for duplicates...", 10)
-        duplicates_to_delete, duplicate_groups = find_duplicate_activities(all_activities)
+    # Remove duplicates
+    update_progress("Finding duplicates...", 20)
+    duplicates = find_duplicate_activities(all_activities)
 
-        if duplicates_to_delete:
-            update_progress(f"Removing {len(duplicates_to_delete)} duplicate activities...", 12)
+    for act in duplicates:
+        success, error = delete_activity(act['RecordID'])
+        if success:
+            results['duplicates_removed'] += 1
+        else:
+            results['errors'].append(f"Delete #{act['RecordID']}: {error}")
+        time.sleep(0.2)
 
-            for idx, act in enumerate(duplicates_to_delete):
-                success, error = delete_activity(act['RecordID'])
-                if success:
-                    results['duplicates_removed'] += 1
-                    results['duplicates_deleted'].append({
-                        'activity_id': act['RecordID'],
-                        'name': act.get('ContactName', ''),
-                        'email': act.get('ContactEmail', '')
-                    })
-                else:
-                    results['errors'].append(f"Failed to delete duplicate #{act['RecordID']}: {error}")
-                time.sleep(0.2)
-
-    # Find orphaned activities from filtered list (or re-fetch if duplicates were removed)
-    update_progress("Finding orphaned activities...", 15)
-    if results['duplicates_removed'] > 0:
-        # Re-fetch since we deleted some
+    # Re-fetch after deletions
+    if duplicates:
         all_activities = fetch_all_mb_activities()
         if target_emails:
-            target_emails_lower = {e.lower().strip() for e in target_emails}
-            all_activities = [a for a in all_activities if (a.get('ContactEmail') or '').lower().strip() in target_emails_lower]
+            target_lower = {e.lower().strip() for e in target_emails}
+            all_activities = [a for a in all_activities
+                             if (a.get('ContactEmail') or '').lower().strip() in target_lower]
 
+    # Link orphaned activities to existing contacts
+    update_progress("Linking orphans...", 60)
     orphaned = [a for a in all_activities if not a.get('Contacts_RecordID')]
-    results['orphaned_found'] = len(orphaned)
 
-    if not orphaned and results['duplicates_removed'] == 0:
-        update_progress("No cleanup needed!", 100)
-        return results
-
-    if not orphaned:
-        update_progress("Duplicate removal complete!", 100)
-        return results
-
-    update_progress(f"Found {len(orphaned)} orphaned activities", 18)
-
-    # Process each orphaned activity
-    for idx, activity in enumerate(orphaned):
-        pct = 20 + int(75 * idx / len(orphaned))
-        activity_id = activity['RecordID']
-        contact_name = activity.get('ContactName', 'Unknown')
-        contact_email = (activity.get('ContactEmail') or '').lower().strip()
-        company = activity.get('ActivityCompanyName', '')
-
-        update_progress(f"Processing {contact_name}...", pct)
-
-        if not contact_email:
-            results['skipped_no_email'] += 1
-            results['errors'].append(f"Activity #{activity_id}: No email address")
-            continue
-
-        # Check if contact exists
-        contacts_record_id = None
-        is_new = False
-
-        if contact_email in existing_contacts:
-            contacts_record_id = existing_contacts[contact_email]['RecordID']
-        else:
-            # Create new contact
-            name_parts = contact_name.split(' ', 1)
-            first_name = name_parts[0] if name_parts else ''
-            last_name = name_parts[1] if len(name_parts) > 1 else ''
-
-            new_contact_id, contact_error = create_contact(
-                first_name=first_name,
-                last_name=last_name,
-                company=company,
-                email=contact_email
-            )
-
-            if new_contact_id:
-                contacts_record_id = new_contact_id
-                results['contacts_created'] += 1
-                existing_contacts[contact_email] = {'RecordID': new_contact_id}
-                is_new = True
+    for act in orphaned:
+        email = (act.get('ContactEmail') or '').lower().strip()
+        if email and email in existing_contacts:
+            contact_id = existing_contacts[email]['RecordID']
+            success, error = update_activity_contact(act['RecordID'], contact_id)
+            if success:
+                results['activities_linked'] += 1
             else:
-                results['errors'].append(f"Activity #{activity_id}: Failed to create contact - {contact_error}")
-                continue
+                results['errors'].append(f"Link #{act['RecordID']}: {error}")
+            time.sleep(0.2)
 
-            time.sleep(0.3)
-
-        # Update activity to link to contact
-        success, error = update_activity_contact(activity_id, contacts_record_id)
-
-        if success:
-            results['activities_linked'] += 1
-            results['details'].append({
-                'activity_id': activity_id,
-                'contact_name': contact_name,
-                'contact_email': contact_email,
-                'contact_id': contacts_record_id,
-                'is_new_contact': is_new
-            })
-        else:
-            results['errors'].append(f"Activity #{activity_id}: Failed to link - {error}")
-
-        time.sleep(0.3)
-
-    update_progress("Cleanup complete!", 100)
+    update_progress("Done!", 100)
     return results

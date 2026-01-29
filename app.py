@@ -94,6 +94,15 @@ TOOL_CATEGORIES = {
                 "permission": "materialbank"
             }
         }
+    },
+    "Admin Tools": {
+        "icon": "🔧",
+        "tools": {
+            "Method CRM Admin": {
+                "description": "Fix orphaned contacts and cleanup activities",
+                "permission": "admin"
+            }
+        }
     }
 }
 
@@ -967,8 +976,10 @@ elif tool == "Material Bank Leads":
     import pandas as pd
     from materialbank_method import (
         get_api_key, load_existing_contacts, convert_materialbank_to_method,
-        process_materialbank_import, fetch_orphaned_activities, cleanup_orphaned_activities,
-        fetch_all_mb_activities, find_duplicate_activities
+        process_materialbank_import, process_activities_only,
+        fetch_all_mb_activities, find_duplicate_activities, cleanup_activities,
+        fix_orphaned_contacts, get_contact_by_email, get_headers, BASE_URL,
+        api_request_with_retry, create_customer
     )
     from gsheets_storage import get_last_materialbank_import, log_materialbank_import
 
@@ -1009,11 +1020,24 @@ elif tool == "Material Bank Leads":
         with st.expander("Preview Data", expanded=False):
             st.dataframe(mb_df.head(20))
 
+        # Import mode selection
+        st.subheader("Import Mode")
+        import_mode = st.radio(
+            "Choose import method:",
+            ["csv_download", "activities_only", "full_api"],
+            format_func=lambda x: {
+                "csv_download": "📥 Download CSV for Method Import (then create activities via API)",
+                "activities_only": "📋 Create Activities Only (contacts already imported via CSV)",
+                "full_api": "🔄 Full API Import (creates Customers + Contacts + Activities)"
+            }[x],
+            help="CSV download uses less API quota. Full API is fully automated but uses more quota."
+        )
+
         # Options
         col1, col2 = st.columns(2)
         with col1:
-            check_existing = st.checkbox("Skip existing contacts", value=True,
-                                         help="Check Method CRM for existing contacts and skip duplicates")
+            check_existing = st.checkbox("Skip existing contacts", value=False,
+                                         help="Use when re-uploading a CSV after a failure - skips contacts already processed in a previous attempt")
         with col2:
             create_followups = st.checkbox("Create follow-up activities", value=True,
                                            help="Create 'Intro EMAIL' follow-up activities for each lead")
@@ -1045,116 +1069,447 @@ elif tool == "Material Bank Leads":
 
                     # Store in session for import
                     st.session_state['mb_ready_df'] = mb_df
+                    st.session_state['mb_method_df'] = method_df
                     st.session_state['mb_existing_contacts'] = existing_contacts
                     st.session_state['mb_stats'] = stats
+                    st.session_state['mb_import_mode'] = import_mode
                 else:
                     st.warning("No new leads to import - all contacts already exist in Method")
+                    # Still store for activities_only mode
+                    st.session_state['mb_ready_df'] = mb_df
+                    st.session_state['mb_existing_contacts'] = existing_contacts
+                    st.session_state['mb_import_mode'] = import_mode
 
-        # Import button (only show if ready)
+        # Import section (only show if ready)
         if 'mb_ready_df' in st.session_state:
             st.divider()
+            current_mode = st.session_state.get('mb_import_mode', 'full_api')
 
-            if st.button("Import to Method CRM", type="primary"):
+            # === CSV DOWNLOAD MODE ===
+            if current_mode == "csv_download":
+                st.subheader("📥 Step 1: Download CSV for Method Import")
+                st.markdown("Download this CSV and import it into Method CRM to create Customers and Contacts.")
+
+                if 'mb_method_df' in st.session_state:
+                    method_df = st.session_state['mb_method_df']
+                    csv_data = method_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Method Import CSV",
+                        data=csv_data,
+                        file_name=f"method_import_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                        mime="text/csv",
+                        type="primary"
+                    )
+                    st.info(f"CSV contains {len(method_df)} new leads to import.")
+
+                st.subheader("📋 Step 2: Create Activities")
+                st.markdown("After importing the CSV to Method, click below to create MB Samples activities.")
+
+                if st.button("Create Activities for Imported Contacts", type="primary"):
+                    # Reload contacts to get the newly imported ones
+                    with st.spinner("Loading contacts and creating activities..."):
+                        fresh_contacts = load_existing_contacts()
+                        user_email = st.session_state.get("user_email", "local")
+                        log_activity(user_email, "Material Bank Leads", "activities_only", "started")
+
+                        results = process_activities_only(
+                            st.session_state['mb_ready_df'],
+                            fresh_contacts
+                        )
+
+                    st.subheader("Activity Creation Results")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Activities Created", results['activities_created'])
+                    with col2:
+                        st.metric("Follow-ups Created", results['followups_created'])
+                    with col3:
+                        st.metric("Skipped (no contact)", results.get('skipped', 0))
+
+                    if results['errors']:
+                        with st.expander(f"Errors ({len(results['errors'])})"):
+                            for err in results['errors']:
+                                st.text(err)
+
+                    st.success("Activities created!")
+
+            # === ACTIVITIES ONLY MODE ===
+            elif current_mode == "activities_only":
+                st.subheader("📋 Create Activities Only")
+                st.markdown("Creates MB Samples activities for contacts that already exist in Method.")
+
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    dry_run = st.checkbox("Dry Run", value=True, help="Preview without making changes")
+
+                if st.button("Create Activities" if not dry_run else "Preview Activities", type="primary" if not dry_run else "secondary"):
+                    with st.spinner("Processing..."):
+                        fresh_contacts = load_existing_contacts()
+                        user_email = st.session_state.get("user_email", "local")
+                        if not dry_run:
+                            log_activity(user_email, "Material Bank Leads", "activities_only", "started")
+
+                        results = process_activities_only(
+                            st.session_state['mb_ready_df'],
+                            fresh_contacts,
+                            dry_run=dry_run
+                        )
+
+                    prefix = "Would Create " if dry_run else ""
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric(f"{prefix}Activities", results['activities_created'])
+                    with col2:
+                        st.metric(f"{prefix}Follow-ups", results['followups_created'])
+                    with col3:
+                        st.metric("Skipped (no contact)", results.get('skipped', 0))
+
+                    if results.get('skipped_details'):
+                        with st.expander(f"Skipped - No Contact Found ({len(results['skipped_details'])})"):
+                            for detail in results['skipped_details']:
+                                st.text(f"{detail['name']} ({detail['email']})")
+
+                    if not dry_run:
+                        st.success("Activities created!")
+
+            # === FULL API MODE ===
+            else:
+                st.subheader("🔄 Full API Import")
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    dry_run = st.checkbox("Dry Run", value=True, help="Preview what will be created without making changes")
+                with col2:
+                    button_label = "Preview Import (Dry Run)" if dry_run else "Import to Method CRM"
+                    button_type = "secondary" if dry_run else "primary"
+
+                if st.button(button_label, type=button_type):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    def progress_callback(msg, pct):
+                        if pct is not None:
+                            progress_bar.progress(pct / 100)
+                        status_text.text(msg)
+
+                    spinner_text = "Previewing import..." if dry_run else "Importing leads and creating activities..."
+                    with st.spinner(spinner_text):
+                        user_email = st.session_state.get("user_email", "local")
+                        if not dry_run:
+                            log_activity(user_email, "Material Bank Leads", "import", "started")
+
+                        results = process_materialbank_import(
+                            st.session_state['mb_ready_df'],
+                            st.session_state['mb_existing_contacts'],
+                            progress_callback,
+                            dry_run=dry_run
+                        )
+
+                    # Show results
+                    if dry_run:
+                        st.subheader("Dry Run Preview")
+                        st.info("This is a preview. No changes were made to Method CRM.")
+                    else:
+                        st.subheader("Import Results")
+
+                    col1, col2, col3, col4, col5, col6 = st.columns(6)
+                    prefix = "Would " if dry_run else ""
+                    with col1:
+                        st.metric("Leads Processed", results['leads_processed'])
+                    with col2:
+                        st.metric(f"{prefix}Create Customers", results.get('customers_created', 0))
+                    with col3:
+                        st.metric(f"{prefix}Create Contacts", results.get('contacts_created', 0))
+                    with col4:
+                        st.metric(f"{prefix}Create Activities", results['activities_created'])
+                    with col5:
+                        st.metric("Existing Updated", results.get('existing_updated', 0))
+                    with col6:
+                        st.metric(f"{prefix}Create Follow-ups", results['followups_created'])
+
+                    if results['errors']:
+                        st.warning(f"{len(results['errors'])} errors occurred")
+                        with st.expander("View Errors"):
+                            for err in results['errors']:
+                                st.text(err)
+
+                    if results['details']:
+                        expander_title = "What Would Be Created" if dry_run else "Import Details"
+                        with st.expander(expander_title, expanded=True):
+                            for detail in results['details']:
+                                if detail.get('contact_created'):
+                                    status = "NEW contact" + ("" if dry_run else f" #{detail.get('contact_id', 'N/A')}")
+                                else:
+                                    status = "existing contact"
+                                activity_str = "" if dry_run else f" - Activity #{detail.get('activity_id', 'N/A')}"
+                                st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples{activity_str} [{status}]")
+
+                        # Only log actual imports, not dry runs
+                        if not dry_run:
+                            user_email = st.session_state.get("user_email", "local")
+                            log_materialbank_import(results['details'], results['activities_created'], user_email, MATERIALBANK_LOG)
+
+                    # Only clear session state after actual import, not dry run
+                    if not dry_run:
+                        del st.session_state['mb_ready_df']
+                        del st.session_state['mb_existing_contacts']
+                        del st.session_state['mb_stats']
+                        st.success("Import complete!")
+                    else:
+                        st.info("Dry run complete. Uncheck 'Dry Run' and click again to perform the actual import.")
+
+
+# =============================================================================
+# ADMIN TOOLS
+# =============================================================================
+
+elif tool == "Method CRM Admin":
+    st.header("🔧 Method CRM Admin")
+    st.markdown("Administrative tools for fixing data issues in Method CRM.")
+
+    import pandas as pd
+    import time
+    from materialbank_method import (
+        get_api_key, fix_orphaned_contacts, get_contact_by_email, get_headers, BASE_URL,
+        fetch_all_mb_activities, find_duplicate_activities, cleanup_activities
+    )
+    from gsheets_storage import log_activity
+
+    # Check for API key
+    if not get_api_key():
+        st.error("METHOD_API_KEY not configured. Add it to environment variables or Streamlit secrets.")
+        st.stop()
+
+    # ==========================================================================
+    # FIX ORPHANED CONTACTS SECTION
+    # ==========================================================================
+    st.subheader("Fix Orphaned Contacts")
+    st.markdown("""
+    Fix contacts that were imported without Customer Lead records.
+    Upload a Material Bank CSV to identify which contacts to check.
+    """)
+
+    # File upload for targeting
+    admin_csv = st.file_uploader(
+        "Upload Material Bank CSV to target specific contacts",
+        type=['csv'],
+        key="admin_csv_upload"
+    )
+
+    if admin_csv:
+        admin_df = pd.read_csv(admin_csv)
+        admin_emails = set(admin_df['Email'].str.lower().str.strip().dropna().unique())
+        st.session_state['admin_target_emails'] = admin_emails
+        st.session_state['admin_csv_df'] = admin_df
+        st.success(f"Loaded {len(admin_emails)} unique emails from {admin_csv.name}")
+
+    has_csv = 'admin_target_emails' in st.session_state and st.session_state['admin_target_emails']
+
+    if has_csv:
+        target_emails = list(st.session_state['admin_target_emails'])
+        st.info(f"Will check **{len(target_emails)}** emails from uploaded CSV")
+    else:
+        st.warning("Upload a Material Bank CSV above to enable orphan check.")
+        target_emails = None
+
+    if st.button("Check for Orphaned Contacts", disabled=not has_csv, key="admin_check_orphans"):
+        if not target_emails:
+            st.error("Please upload a CSV file first.")
+        else:
+            orphan_check_results = {'orphaned': [], 'already_linked': [], 'not_found': []}
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            for idx, email in enumerate(target_emails):
+                pct = int(100 * idx / len(target_emails))
+                progress_bar.progress(pct)
+                status_text.text(f"Checking {idx+1}/{len(target_emails)}: {email}")
+
+                contact = get_contact_by_email(email)
+                time.sleep(0.15)
+
+                if not contact:
+                    orphan_check_results['not_found'].append(email)
+                elif contact.get('Entity_RecordID'):
+                    orphan_check_results['already_linked'].append({
+                        'email': email,
+                        'name': contact.get('Name'),
+                        'customer_id': contact.get('Entity_RecordID')
+                    })
+                else:
+                    orphan_check_results['orphaned'].append({
+                        'email': email,
+                        'name': contact.get('Name'),
+                        'contact_id': contact.get('RecordID'),
+                        'company': contact.get('CompanyName')
+                    })
+
+            progress_bar.progress(100)
+            status_text.text("Check complete!")
+
+            st.session_state['admin_orphan_results'] = orphan_check_results
+
+            # Display results
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Orphaned", len(orphan_check_results['orphaned']))
+            with col2:
+                st.metric("Already Linked", len(orphan_check_results['already_linked']))
+            with col3:
+                st.metric("Not Found", len(orphan_check_results['not_found']))
+
+            if orphan_check_results['orphaned']:
+                with st.expander(f"Preview Orphaned Contacts ({len(orphan_check_results['orphaned'])})"):
+                    for c in orphan_check_results['orphaned'][:20]:
+                        st.text(f"{c.get('name', 'N/A')} - {c.get('email')} ({c.get('company', 'N/A')})")
+                    if len(orphan_check_results['orphaned']) > 20:
+                        st.text(f"... and {len(orphan_check_results['orphaned']) - 20} more")
+            else:
+                st.success("No orphaned contacts found!")
+
+    # Show fix button if we have orphaned contacts
+    if 'admin_orphan_results' in st.session_state:
+        results = st.session_state['admin_orphan_results']
+        orphaned = results.get('orphaned', [])
+
+        if orphaned:
+            st.divider()
+
+            # Build CSV data lookup for company names
+            csv_data = {}
+            if 'admin_csv_df' in st.session_state:
+                admin_df = st.session_state['admin_csv_df']
+                for email in [o['email'] for o in orphaned]:
+                    rows = admin_df[admin_df['Email'].str.lower().str.strip() == email.lower()]
+                    if len(rows) > 0:
+                        row = rows.iloc[0]
+                        csv_data[email.lower()] = {
+                            'company': row.get('Company', ''),
+                            'first_name': row.get('First Name', ''),
+                            'last_name': row.get('Last Name', ''),
+                            'phone': row.get('Work Phone') if pd.notna(row.get('Work Phone')) else None,
+                            'mobile': row.get('Mobile Phone') if pd.notna(row.get('Mobile Phone')) else None,
+                        }
+                st.info(f"Will use company names from uploaded CSV for {len(csv_data)} contacts.")
+
+            # Dry run checkbox
+            dry_run = st.checkbox("Dry run (preview only, no changes)", value=True, key="admin_fix_dryrun")
+
+            if st.button(f"{'Preview' if dry_run else 'Fix'} {len(orphaned)} Orphaned Contacts", type="primary", key="admin_fix_orphans"):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                retry_status = st.empty()
 
-                def progress_callback(msg, pct):
+                def update_progress(msg, pct):
                     if pct is not None:
-                        progress_bar.progress(pct / 100)
+                        progress_bar.progress(min(pct, 100))
                     status_text.text(msg)
+                    retry_status.empty()
 
-                with st.spinner("Importing leads and creating activities..."):
-                    user_email = st.session_state.get("user_email", "local")
-                    log_activity(user_email, "Material Bank Leads", "import", "started")
+                def handle_retry(attempt, wait_seconds, reason):
+                    if reason == "rate_limit":
+                        reason_text = "⚠️ Rate limited by API"
+                    else:
+                        reason_text = "⚠️ Connection error"
 
-                    results = process_materialbank_import(
-                        st.session_state['mb_ready_df'],
-                        st.session_state['mb_existing_contacts'],
-                        progress_callback
-                    )
+                    if wait_seconds >= 60:
+                        retry_status.warning(f"{reason_text} - Retry {attempt}: waiting {wait_seconds} seconds...")
+                    else:
+                        retry_status.info(f"{reason_text} - Retry {attempt}: waiting {wait_seconds} seconds...")
 
-                # Show results
-                st.subheader("Import Results")
+                user_email = st.session_state.get("user_email", "local")
+                if not dry_run:
+                    log_activity(user_email, "Method CRM Admin", "fix_orphans", "started")
 
-                col1, col2, col3, col4, col5 = st.columns(5)
+                fix_results = fix_orphaned_contacts(
+                    progress_callback=update_progress,
+                    target_emails=[o['email'] for o in orphaned],
+                    dry_run=dry_run,
+                    csv_data=csv_data if csv_data else None,
+                    retry_callback=handle_retry
+                )
+
+                retry_status.empty()
+
+                # Display results
+                st.subheader("Fix Results" if not dry_run else "Dry Run Preview")
+
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Leads Processed", results['leads_processed'])
+                    st.metric("Customers Created", fix_results['customers_created'])
                 with col2:
-                    st.metric("Contacts Created", results.get('contacts_created', 0))
+                    st.metric("Contacts Created", fix_results['contacts_created'])
                 with col3:
-                    st.metric("Activities Created", results['activities_created'])
+                    st.metric("Orphans Deleted", fix_results['orphans_deleted'])
                 with col4:
-                    st.metric("Existing Updated", results.get('existing_updated', 0))
-                with col5:
-                    st.metric("Follow-ups Created", results['followups_created'])
+                    st.metric("Activities Relinked", fix_results['activities_relinked'])
 
-                if results['errors']:
-                    st.warning(f"{len(results['errors'])} errors occurred")
+                if fix_results['errors']:
+                    st.warning(f"{len(fix_results['errors'])} errors occurred:")
                     with st.expander("View Errors"):
-                        for err in results['errors']:
-                            st.text(err)
+                        for err in fix_results['errors']:
+                            st.text(f"• {err}")
 
-                if results['details']:
-                    with st.expander("Import Details", expanded=True):
-                        for detail in results['details']:
-                            if detail.get('is_existing'):
-                                status = "existing contact"
-                            else:
-                                status = "NEW contact created"
-                            st.markdown(f"- **{detail['name']}** ({detail['company']}) - {detail['samples']} samples - Activity #{detail['activity_id']} [{status}]")
+                    existing_company_errors = [e for e in fix_results['errors'] if 'already in use' in e.lower() or 'Name is already' in e]
+                    if existing_company_errors:
+                        st.info("Some contacts work at companies that already exist in Method. These need to be linked to existing customers.")
 
-                    # Log the import (uses cloud or local automatically)
-                    user_email = st.session_state.get("user_email", "local")
-                    log_materialbank_import(results['details'], results['activities_created'], user_email, MATERIALBANK_LOG)
+                if fix_results['details']:
+                    with st.expander("Details"):
+                        for d in fix_results['details']:
+                            status = d.get('status', 'unknown')
+                            name = d.get('name', d.get('email'))
+                            company = d.get('company', '')
+                            st.text(f"{name} ({company}): {status}")
 
-                # Clear session state
-                del st.session_state['mb_ready_df']
-                del st.session_state['mb_existing_contacts']
-                del st.session_state['mb_stats']
+                if not dry_run:
+                    log_activity(user_email, "Method CRM Admin", "fix_orphans",
+                                f"completed: {fix_results['customers_created']} customers, {fix_results['contacts_created']} contacts")
+                    st.success("Fix complete!")
+                    if 'admin_orphan_results' in st.session_state:
+                        del st.session_state['admin_orphan_results']
 
-                st.success("Import complete!")
-
-    # Cleanup section
+    # ==========================================================================
+    # CLEANUP ACTIVITIES SECTION
+    # ==========================================================================
     st.divider()
     st.subheader("Cleanup Activities")
     st.markdown("Remove duplicate activities and link orphaned activities to contacts.")
 
     # Scope selection
-    has_uploaded = 'mb_uploaded_emails' in st.session_state and st.session_state['mb_uploaded_emails']
-    if has_uploaded:
-        filename = st.session_state.get('mb_uploaded_filename', 'uploaded file')
-        email_count = len(st.session_state['mb_uploaded_emails'])
+    has_admin_csv = 'admin_target_emails' in st.session_state and st.session_state['admin_target_emails']
+    if has_admin_csv:
+        email_count = len(st.session_state['admin_target_emails'])
         cleanup_scope = st.radio(
             "Cleanup scope:",
             ["uploaded_file", "all"],
-            format_func=lambda x: f"From uploaded file only ({email_count} emails from {filename})" if x == "uploaded_file" else "All MB Samples activities",
-            horizontal=True
+            format_func=lambda x: f"From uploaded file only ({email_count} emails)" if x == "uploaded_file" else "All MB Samples activities",
+            horizontal=True,
+            key="admin_cleanup_scope"
         )
     else:
         cleanup_scope = "all"
         st.info("Upload a CSV file above to enable targeted cleanup for specific emails.")
 
-    if st.button("Check for Issues"):
+    if st.button("Check for Issues", key="admin_check_issues"):
         with st.spinner("Scanning for orphaned activities and duplicates..."):
             all_activities = fetch_all_mb_activities()
 
             # Filter by scope if needed
-            if cleanup_scope == "uploaded_file" and has_uploaded:
-                target_emails = st.session_state['mb_uploaded_emails']
+            if cleanup_scope == "uploaded_file" and has_admin_csv:
+                target_emails = st.session_state['admin_target_emails']
                 all_activities = [a for a in all_activities if (a.get('ContactEmail') or '').lower().strip() in target_emails]
                 st.info(f"Filtered to {len(all_activities)} activities matching uploaded emails")
 
             orphaned = [a for a in all_activities if not a.get('Contacts_RecordID')]
-            duplicates, _ = find_duplicate_activities(all_activities)
+            duplicates = find_duplicate_activities(all_activities)
 
-            # Store scope for cleanup
-            st.session_state['mb_cleanup_scope'] = cleanup_scope
+            st.session_state['admin_cleanup_scope_val'] = cleanup_scope
 
         issues_found = False
 
         if duplicates:
             st.warning(f"Found **{len(duplicates)}** duplicate activities (same email + date).")
-            st.session_state['mb_duplicates_count'] = len(duplicates)
+            st.session_state['admin_duplicates_count'] = len(duplicates)
             issues_found = True
 
             with st.expander("Preview Duplicates", expanded=False):
@@ -1165,7 +1520,7 @@ elif tool == "Material Bank Leads":
 
         if orphaned:
             st.warning(f"Found **{len(orphaned)}** orphaned activities without linked contacts.")
-            st.session_state['mb_orphaned'] = orphaned
+            st.session_state['admin_orphaned_activities'] = orphaned
             issues_found = True
 
             with st.expander("Preview Orphaned Activities", expanded=False):
@@ -1176,17 +1531,17 @@ elif tool == "Material Bank Leads":
 
         if not issues_found:
             st.success("No issues found. All activities are properly linked with no duplicates!")
-            if 'mb_orphaned' in st.session_state:
-                del st.session_state['mb_orphaned']
-            if 'mb_duplicates_count' in st.session_state:
-                del st.session_state['mb_duplicates_count']
+            if 'admin_orphaned_activities' in st.session_state:
+                del st.session_state['admin_orphaned_activities']
+            if 'admin_duplicates_count' in st.session_state:
+                del st.session_state['admin_duplicates_count']
 
-    has_issues = st.session_state.get('mb_orphaned') or st.session_state.get('mb_duplicates_count', 0) > 0
+    has_issues = st.session_state.get('admin_orphaned_activities') or st.session_state.get('admin_duplicates_count', 0) > 0
     if has_issues:
-        orphaned_count = len(st.session_state.get('mb_orphaned', []))
-        dup_count = st.session_state.get('mb_duplicates_count', 0)
+        orphaned_count = len(st.session_state.get('admin_orphaned_activities', []))
+        dup_count = st.session_state.get('admin_duplicates_count', 0)
         total_issues = orphaned_count + dup_count
-        if st.button(f"Run Cleanup ({total_issues} issues)", type="primary"):
+        if st.button(f"Run Cleanup ({total_issues} issues)", type="primary", key="admin_run_cleanup"):
             progress_bar = st.progress(0)
             status_text = st.empty()
 
@@ -1197,58 +1552,41 @@ elif tool == "Material Bank Leads":
 
             with st.spinner("Running cleanup..."):
                 user_email = st.session_state.get("user_email", "local")
-                log_activity(user_email, "Material Bank Leads", "cleanup", "started")
+                log_activity(user_email, "Method CRM Admin", "cleanup", "started")
 
                 # Get target emails if scoped to uploaded file
                 target_emails = None
-                if st.session_state.get('mb_cleanup_scope') == 'uploaded_file':
-                    target_emails = st.session_state.get('mb_uploaded_emails')
+                if st.session_state.get('admin_cleanup_scope_val') == 'uploaded_file':
+                    target_emails = st.session_state.get('admin_target_emails')
 
-                results = cleanup_orphaned_activities(progress_callback=update_progress, target_emails=target_emails)
+                results = cleanup_activities(progress_callback=update_progress, target_emails=target_emails)
 
             progress_bar.progress(100)
 
             # Show results
             st.subheader("Cleanup Results")
 
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2 = st.columns(2)
             with col1:
                 st.metric("Duplicates Removed", results.get('duplicates_removed', 0))
             with col2:
-                st.metric("Orphaned Found", results['orphaned_found'])
-            with col3:
-                st.metric("Activities Linked", results['activities_linked'])
-            with col4:
-                st.metric("Contacts Created", results['contacts_created'])
-            with col5:
-                st.metric("Skipped (no email)", results['skipped_no_email'])
+                st.metric("Activities Linked", results.get('activities_linked', 0))
 
-            if results['errors']:
+            if results.get('errors'):
                 st.warning(f"{len(results['errors'])} errors occurred")
                 with st.expander("View Errors"):
                     for err in results['errors']:
                         st.text(err)
 
-            if results.get('duplicates_deleted'):
-                with st.expander("Duplicates Deleted", expanded=False):
-                    for detail in results['duplicates_deleted']:
-                        st.markdown(f"- Activity #{detail['activity_id']}: **{detail['name']}** ({detail['email']})")
-
-            if results['details']:
-                with st.expander("Activities Linked", expanded=True):
-                    for detail in results['details']:
-                        status = "NEW contact" if detail.get('is_new_contact') else "existing contact"
-                        st.markdown(f"- Activity #{detail['activity_id']}: **{detail['contact_name']}** -> Contact #{detail['contact_id']} [{status}]")
-
             # Clear session state
-            if 'mb_orphaned' in st.session_state:
-                del st.session_state['mb_orphaned']
-            if 'mb_duplicates_count' in st.session_state:
-                del st.session_state['mb_duplicates_count']
-            if 'mb_cleanup_scope' in st.session_state:
-                del st.session_state['mb_cleanup_scope']
+            if 'admin_orphaned_activities' in st.session_state:
+                del st.session_state['admin_orphaned_activities']
+            if 'admin_duplicates_count' in st.session_state:
+                del st.session_state['admin_duplicates_count']
+            if 'admin_cleanup_scope_val' in st.session_state:
+                del st.session_state['admin_cleanup_scope_val']
 
-            log_activity(user_email, "Material Bank Leads", "cleanup", f"completed: {results.get('duplicates_removed', 0)} duplicates removed, {results['activities_linked']} linked, {results['contacts_created']} created")
+            log_activity(user_email, "Method CRM Admin", "cleanup", f"completed: {results.get('duplicates_removed', 0)} duplicates removed, {results.get('activities_linked', 0)} linked")
             st.success("Cleanup complete!")
 
 
