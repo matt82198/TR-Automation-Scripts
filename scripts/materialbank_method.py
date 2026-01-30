@@ -318,6 +318,13 @@ def create_activity(contact_name, contact_email, company, samples, project_info,
 <p><strong>Project Budget:</strong> {project_info.get('budget', 'N/A')}</p>
 <p><strong>Project Phase:</strong> {project_info.get('phase', 'N/A')}</p>"""
 
+    # Due date is one week after sample order date
+    try:
+        order_dt = datetime.strptime(order_date, '%Y-%m-%d')
+        due_date = (order_dt + timedelta(days=7)).strftime('%Y-%m-%d')
+    except:
+        due_date = order_date  # Fallback if date parsing fails
+
     activity_data = {
         'ActivityType_RecordID': 22,  # MB Samples
         'ActivityStatus_RecordID': 3,  # Completed
@@ -326,7 +333,7 @@ def create_activity(contact_name, contact_email, company, samples, project_info,
         'ContactName': contact_name,
         'ContactEmail': contact_email,
         'ActivityCompanyName': company,
-        'DueDateStart': order_date,
+        'DueDateStart': due_date,
         'IsToBeRenewed': True,  # Create follow-up
     }
 
