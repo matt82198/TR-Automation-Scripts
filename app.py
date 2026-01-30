@@ -453,91 +453,98 @@ elif tool == "Order Payment Matcher":
             if not ss_api_key:
                 st.error("SQUARESPACE_API_KEY environment variable not set")
             else:
-                with st.spinner(f"Fetching payments and matching {len(order_numbers)} orders..."):
-                    try:
-                        # Fetch payment transactions
-                        start_str = start_date.strftime("%Y-%m-%d")
-                        end_str = end_date.strftime("%Y-%m-%d")
+                try:
+                    # Fetch payment transactions with progress
+                    start_str = start_date.strftime("%Y-%m-%d")
+                    end_str = end_date.strftime("%Y-%m-%d")
 
-                        user_email = st.session_state.get("user_email", "local")
-                        log_activity(user_email, "Order Payment Matcher", "match", f"{len(order_numbers)} orders")
+                    user_email = st.session_state.get("user_email", "local")
+                    log_activity(user_email, "Order Payment Matcher", "match", f"{len(order_numbers)} orders")
 
-                        stripe_txns = fetch_stripe_readonly(start_str, end_str)
-                        paypal_txns = fetch_paypal_readonly(start_str, end_str)
+                    status = st.empty()
+                    status.info("Fetching Stripe transactions (this may take a minute for large date ranges)...")
+                    stripe_txns = fetch_stripe_readonly(start_str, end_str)
 
-                        # Match orders
-                        results, summary = match_order_batch(
-                            order_numbers,
-                            ss_api_key,
-                            stripe_txns,
-                            paypal_txns
-                        )
+                    status.info(f"Found {len(stripe_txns)} Stripe transactions. Fetching PayPal...")
+                    paypal_txns = fetch_paypal_readonly(start_str, end_str)
 
-                        # Display summary
-                        st.success(f"Matched {summary['matched']}/{summary['total_orders']} orders")
+                    status.info(f"Found {len(paypal_txns)} PayPal transactions. Matching {len(order_numbers)} orders...")
 
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Total Gross", f"${summary['total_gross']:,.2f}")
-                        with col2:
-                            st.metric("Total Net", f"${summary['total_net']:,.2f}")
-                        with col3:
-                            st.metric("Total Fees", f"${summary['total_fees']:,.2f}")
-                        with col4:
-                            st.metric("Total Write-off", f"${summary['total_write_off']:,.2f}")
+                    # Match orders
+                    results, summary = match_order_batch(
+                        order_numbers,
+                        ss_api_key,
+                        stripe_txns,
+                        paypal_txns
+                    )
 
-                        if summary['not_found']:
-                            st.warning(f"Orders not found in Squarespace: {', '.join(summary['not_found'])}")
+                    status.empty()
 
-                        # Display results table
-                        st.subheader("Results")
+                    # Display summary
+                    st.success(f"Matched {summary['matched']}/{summary['total_orders']} orders")
 
-                        # Separate matched and unmatched
-                        matched = [r for r in results if r['matched']]
-                        unmatched = [r for r in results if not r['matched']]
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Gross", f"${summary['total_gross']:,.2f}")
+                    with col2:
+                        st.metric("Total Net", f"${summary['total_net']:,.2f}")
+                    with col3:
+                        st.metric("Total Fees", f"${summary['total_fees']:,.2f}")
+                    with col4:
+                        st.metric("Total Write-off", f"${summary['total_write_off']:,.2f}")
 
-                        if matched:
-                            st.markdown("**Matched Orders:**")
-                            for r in matched:
-                                with st.expander(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f}"):
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.write(f"**Date:** {r['order_date']}")
-                                        st.write(f"**Customer:** {r['customer_name']}")
-                                        st.write(f"**Email:** {r['customer_email']}")
-                                    with col2:
-                                        st.write(f"**Payment Source:** {r['payment_source']}")
-                                        st.write(f"**Gross:** ${r['gross_amount']:.2f}")
-                                        st.write(f"**Net:** ${r['net_amount']:.2f}")
-                                        st.write(f"**Fee:** ${r['processing_fee']:.2f}")
-                                        st.write(f"**Write-off:** ${r['write_off']:.2f}")
+                    if summary['not_found']:
+                        st.warning(f"Orders not found in Squarespace: {', '.join(summary['not_found'])}")
 
-                        if unmatched:
-                            st.markdown("**Unmatched Orders:**")
-                            for r in unmatched:
-                                st.warning(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f} (No payment match found)")
+                    # Display results table
+                    st.subheader("Results")
 
-                        # Generate CSV for download
-                        csv_lines = ["Order Number,Date,Customer,Email,Payment Source,Gross,Net,Fee,Write-off,Matched"]
-                        for r in results:
-                            net = f"{r['net_amount']:.2f}" if r['net_amount'] is not None else ""
-                            fee = f"{r['processing_fee']:.2f}" if r['processing_fee'] is not None else ""
-                            writeoff = f"{r['write_off']:.2f}" if r['write_off'] is not None else ""
-                            csv_lines.append(f"{r['order_number']},{r['order_date']},{r['customer_name']},{r['customer_email']},{r['payment_source']},{r['gross_amount']:.2f},{net},{fee},{writeoff},{r['matched']}")
+                    # Separate matched and unmatched
+                    matched = [r for r in results if r['matched']]
+                    unmatched = [r for r in results if not r['matched']]
 
-                        csv_content = "\n".join(csv_lines)
-                        st.download_button(
-                            label="Download Results CSV",
-                            data=csv_content,
-                            file_name=f"order_payment_match_{datetime.now().strftime('%Y-%m-%d')}.csv",
-                            mime="text/csv",
-                            type="primary"
-                        )
+                    if matched:
+                        st.markdown("**Matched Orders:**")
+                        for r in matched:
+                            with st.expander(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f}"):
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.write(f"**Date:** {r['order_date']}")
+                                    st.write(f"**Customer:** {r['customer_name']}")
+                                    st.write(f"**Email:** {r['customer_email']}")
+                                with col2:
+                                    st.write(f"**Payment Source:** {r['payment_source']}")
+                                    st.write(f"**Gross:** ${r['gross_amount']:.2f}")
+                                    st.write(f"**Net:** ${r['net_amount']:.2f}")
+                                    st.write(f"**Fee:** ${r['processing_fee']:.2f}")
+                                    st.write(f"**Write-off:** ${r['write_off']:.2f}")
 
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-                        import traceback
-                        st.text(traceback.format_exc())
+                    if unmatched:
+                        st.markdown("**Unmatched Orders:**")
+                        for r in unmatched:
+                            st.warning(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f} (No payment match found)")
+
+                    # Generate CSV for download
+                    csv_lines = ["Order Number,Date,Customer,Email,Payment Source,Gross,Net,Fee,Write-off,Matched"]
+                    for r in results:
+                        net = f"{r['net_amount']:.2f}" if r['net_amount'] is not None else ""
+                        fee = f"{r['processing_fee']:.2f}" if r['processing_fee'] is not None else ""
+                        writeoff = f"{r['write_off']:.2f}" if r['write_off'] is not None else ""
+                        csv_lines.append(f"{r['order_number']},{r['order_date']},{r['customer_name']},{r['customer_email']},{r['payment_source']},{r['gross_amount']:.2f},{net},{fee},{writeoff},{r['matched']}")
+
+                    csv_content = "\n".join(csv_lines)
+                    st.download_button(
+                        label="Download Results CSV",
+                        data=csv_content,
+                        file_name=f"order_payment_match_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                        mime="text/csv",
+                        type="primary"
+                    )
+
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                    import traceback
+                    st.text(traceback.format_exc())
 
 
 elif tool == "QuickBooks Billing":

@@ -1542,10 +1542,20 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                     report.write(f"   Email: {cust_info['email']}\n")
                 if cust_info.get('phone'):
                     report.write(f"   Phone: {cust_info['phone']}\n")
+                report.write(f"   Bill To:\n")
                 if cust_info.get('addr1'):
-                    report.write(f"   Address: {cust_info['addr1']}\n")
-                    if cust_info.get('addr3'):  # City, State, ZIP
-                        report.write(f"            {cust_info['addr3']}\n")
+                    report.write(f"      {cust_info['addr1']}\n")
+                if cust_info.get('addr2'):
+                    report.write(f"      {cust_info['addr2']}\n")
+                if cust_info.get('addr3'):
+                    report.write(f"      {cust_info['addr3']}\n")
+                report.write(f"   Ship To:\n")
+                if cust_info.get('saddr1'):
+                    report.write(f"      {cust_info['saddr1']}\n")
+                if cust_info.get('saddr2'):
+                    report.write(f"      {cust_info['saddr2']}\n")
+                if cust_info.get('saddr3'):
+                    report.write(f"      {cust_info['saddr3']}\n")
                 report.write("\n")
         else:
             report.write("No new customers - all orders matched existing customers!\n")
