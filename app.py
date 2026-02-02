@@ -1299,12 +1299,14 @@ elif tool == "Material Bank Leads":
                     st.session_state['mb_existing_contacts'] = existing_contacts
                     st.session_state['mb_stats'] = stats
                     st.session_state['mb_import_mode'] = import_mode
+                    st.session_state['mb_skip_existing'] = check_existing
                 else:
                     st.warning("No new leads to import - all contacts already exist in Method")
                     # Still store for activities_only mode
                     st.session_state['mb_ready_df'] = mb_df
                     st.session_state['mb_existing_contacts'] = existing_contacts
                     st.session_state['mb_import_mode'] = import_mode
+                    st.session_state['mb_skip_existing'] = check_existing
 
         # Import section (only show if ready)
         if 'mb_ready_df' in st.session_state:
@@ -1427,7 +1429,8 @@ elif tool == "Material Bank Leads":
                             st.session_state['mb_ready_df'],
                             st.session_state['mb_existing_contacts'],
                             progress_callback,
-                            dry_run=dry_run
+                            dry_run=dry_run,
+                            skip_existing=st.session_state.get('mb_skip_existing', False)
                         )
 
                     # Show results
@@ -1451,6 +1454,9 @@ elif tool == "Material Bank Leads":
                         st.metric("Existing Updated", results.get('existing_updated', 0))
                     with col6:
                         st.metric(f"{prefix}Create Follow-ups", results['followups_created'])
+
+                    if results.get('skipped_existing', 0) > 0:
+                        st.info(f"Skipped {results['skipped_existing']} existing contacts (already in Method)")
 
                     if results['errors']:
                         st.warning(f"{len(results['errors'])} errors occurred")

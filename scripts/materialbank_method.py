@@ -372,7 +372,7 @@ def create_followup_activity(parent_activity_id, contact_name, contact_email, co
     return None, f"API {r.status_code if r else 'No response'}: {r.text[:200] if r else 'Connection failed'}"
 
 
-def process_materialbank_import(mb_df, existing_contacts=None, progress_callback=None, dry_run=False):
+def process_materialbank_import(mb_df, existing_contacts=None, progress_callback=None, dry_run=False, skip_existing=False):
     """
     Full pipeline: Convert MB data, create contacts, activities, and follow-ups.
 
@@ -384,6 +384,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         existing_contacts: Dict of email -> contact info (optional, will fetch if None)
         progress_callback: Function to call with progress updates (msg, pct)
         dry_run: If True, only report what would be done without making changes
+        skip_existing: If True, completely skip leads that already have contacts (for re-uploads after failures)
 
     Returns:
         Dict with results and stats
@@ -395,6 +396,7 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         'activities_created': 0,
         'followups_created': 0,
         'existing_updated': 0,
+        'skipped_existing': 0,
         'errors': [],
         'details': [],
         'dry_run': dry_run
@@ -440,6 +442,12 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         contact_name = f"{lead_row['First Name']} {lead_row['Last Name']}"
         company = lead_row['Company']
         is_existing = email in existing_emails
+
+        # Skip existing contacts entirely if skip_existing is enabled
+        if skip_existing and is_existing:
+            results['skipped_existing'] += 1
+            update_progress(f"Skipping {contact_name} (already exists)...", pct)
+            continue
 
         update_progress(f"Processing {contact_name} ({'existing' if is_existing else 'new'})...", pct)
 
