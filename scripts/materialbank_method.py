@@ -421,8 +421,8 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
     mb_df['Order Date'] = pd.to_datetime(mb_df['Order Date'], format='mixed', dayfirst=False)
     mb_df['Email_Lower'] = mb_df['Email'].str.lower()
 
-    # Get unique emails
-    unique_emails = mb_df['Email_Lower'].unique()
+    # Get unique emails (filter out NaN/empty values)
+    unique_emails = [e for e in mb_df['Email_Lower'].unique() if pd.notna(e) and e.strip()]
     total_leads = len(unique_emails)
 
     if total_leads == 0:
@@ -433,6 +433,9 @@ def process_materialbank_import(mb_df, existing_contacts=None, progress_callback
         pct = 20 + int(70 * idx / total_leads)
 
         group = mb_df[mb_df['Email_Lower'] == email]
+        if group.empty:
+            results['errors'].append(f"No data found for email: {email}")
+            continue
         lead_row = group.iloc[0]
         contact_name = f"{lead_row['First Name']} {lead_row['Last Name']}"
         company = lead_row['Company']
