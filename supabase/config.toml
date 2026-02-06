@@ -1,0 +1,15 @@
+# Supabase configuration for TR Automation Scripts
+# See: https://supabase.com/docs/guides/cli/config
+
+[project]
+id = "qbidzaweiypqaufdwqcl"
+
+[db]
+port = 5432
+major_version = 17
+
+[api]
+enabled = false
+
+[studio]
+enabled = false
