@@ -494,32 +494,46 @@ def find_sample_book_match(components: LeatherComponents, qb_items: List[Dict], 
         if 'horween' in product_name.lower():
             search_terms.append(f"sample book - horween {components.tannage.lower()}")
 
-    if components.brand:
-        # Fallback to "All {Brand}"
-        search_terms.append(f"sample book - all {components.brand.lower()}")
-
-    # Special cases
-    if 'walpier' in product_name.lower():
-        search_terms.append('sample book - all walpier')
+    # Special cases for Stead
     if 'stead' in product_name.lower() or 'c.f. stead' in product_name.lower():
-        search_terms.append('sample book - all stead')
         if components.tannage:
             search_terms.append(f"sample book - stead {components.tannage.lower()}")
+
+    # FIRST PASS: Try specific matches only (no "All" fallbacks)
+    for qb in qb_items:
+        qb_raw = qb.get('raw', '').lower()
+        if not qb_raw.startswith('sample book'):
+            continue
+        # Skip "All" entries in first pass
+        if ' all ' in qb_raw:
+            continue
+
+        for term in search_terms:
+            if term in qb_raw:
+                return qb.get('raw')
+            # Also check partial matches for abbreviated names
+            term_parts = term.replace('sample book - ', '').split()
+            if all(part in qb_raw for part in term_parts):
+                return qb.get('raw')
+
+    # SECOND PASS: Fallback to "All {Brand}" if no specific match
+    fallback_terms = []
+    if components.brand:
+        fallback_terms.append(f"sample book - all {components.brand.lower()}")
+    if 'walpier' in product_name.lower():
+        fallback_terms.append('sample book - all walpier')
+    if 'stead' in product_name.lower() or 'c.f. stead' in product_name.lower():
+        fallback_terms.append('sample book - all stead')
     if 'tempesti' in product_name.lower():
-        search_terms.append('sample book - all tempesti')
+        fallback_terms.append('sample book - all tempesti')
 
     for qb in qb_items:
         qb_raw = qb.get('raw', '').lower()
         if not qb_raw.startswith('sample book'):
             continue
 
-        for term in search_terms:
-            # Fuzzy match - check if search term is contained or close
+        for term in fallback_terms:
             if term in qb_raw:
-                return qb.get('raw')
-            # Also check partial matches for abbreviated names
-            term_parts = term.replace('sample book - ', '').split()
-            if all(part in qb_raw for part in term_parts):
                 return qb.get('raw')
 
     return None
