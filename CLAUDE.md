@@ -331,6 +331,94 @@ Persistent data storage abstraction. Uses Google Sheets on Streamlit Cloud, fall
 
 Generates SKU mappings from Squarespace product names using regex-based parsing. Extracts leather type, weight, color, and variant from product titles.
 
+### `utils/database.py`
+
+PostgreSQL database utilities for persistent storage. Connects to Supabase.
+
+- `get_connection()` / `get_cursor()` - Context managers for DB access
+- `query(sql, params)` - Execute SELECT and return list of dicts
+- `execute(sql, params)` - Execute INSERT/UPDATE/DELETE
+- `get_product_mapping(product, variant)` - Look up QB item
+- `get_unmapped_products()` - Products needing QB items
+- `is_order_imported(order_number)` - Check duplicate imports
+- `log_order_import(...)` - Record order import
+- `get_mapping_stats()` - Summary statistics
+
+---
+
+## Database (Supabase PostgreSQL)
+
+The project uses a Supabase PostgreSQL database for persistent storage. Connection credentials are in `.streamlit/secrets.toml`.
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `product_mappings` | Squarespace product → QuickBooks item mappings |
+| `qb_items` | QuickBooks item reference list |
+| `order_imports` | Tracks which orders have been imported |
+| `customer_matches` | Logs customer matching decisions |
+
+### Schema: product_mappings
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | SERIAL | Primary key |
+| `internal_sku` | VARCHAR(100) | Generated SKU code |
+| `squarespace_product` | VARCHAR(500) | Product name from SS |
+| `squarespace_variant` | VARCHAR(500) | Variant name |
+| `squarespace_sku` | VARCHAR(50) | SS SKU code |
+| `quickbooks_item` | VARCHAR(500) | Matched QB item name |
+| `tannage` | VARCHAR(100) | Parsed tannage |
+| `color` | VARCHAR(100) | Parsed color |
+| `weight` | VARCHAR(50) | Parsed weight |
+| `product_type` | VARCHAR(50) | full_hide, panel, accessory, etc. |
+| `needs_qb_item` | BOOLEAN | True if fell back to MISCELLANEOUS |
+| `needs_review` | BOOLEAN | True if closest match (weight mismatch) |
+| `created_at` | TIMESTAMP | Record creation time |
+
+### Connecting to the Database
+
+**From Python:**
+```python
+from utils.database import query, get_mapping_stats
+
+# Get all products needing QB items
+unmapped = query("SELECT * FROM product_mappings WHERE needs_qb_item = TRUE")
+
+# Get stats
+stats = get_mapping_stats()
+print(f"Total: {stats['total']}, Exact: {stats['exact_match']}")
+```
+
+**Direct connection (psql, DBeaver, etc.):**
+- Host: `db.qbidzaweiypqaufdwqcl.supabase.co`
+- Port: `5432`
+- Database: `postgres`
+- User: `postgres`
+- Password: See `SUPABASE_DB_PASSWORD` in secrets.toml
+
+**Supabase Dashboard:**
+https://supabase.com/dashboard/project/qbidzaweiypqaufdwqcl/editor
+
+### Refreshing Product Mappings
+
+After running `build_sku_mapping.py`, reload the database:
+
+```python
+from utils.database import execute, get_cursor
+import csv
+
+with get_cursor() as cur:
+    cur.execute('TRUNCATE product_mappings RESTART IDENTITY;')
+    with open('config/product_mappings.csv', 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            cur.execute('''INSERT INTO product_mappings (...) VALUES (...)''', (...))
+```
+
+Or use the Supabase dashboard to import CSV directly.
+
 ---
 
 ## Product/SKU Mapping Maintenance
@@ -577,6 +665,7 @@ The codebase uses a dual-path system for secrets: tries `streamlit.st.secrets[ke
 | `PAYPAL_CLIENT_ID` | `payment_fetch.py`, `order_payment_matcher.py` | PayPal OAuth client ID |
 | `PAYPAL_CLIENT_SECRET` | `payment_fetch.py`, `order_payment_matcher.py` | PayPal OAuth client secret |
 | `METHOD_API_KEY` | `materialbank_method.py` | Method CRM API key (currently hardcoded, not read from secrets) |
+| `SUPABASE_DB_PASSWORD` | `utils/database.py` | Supabase PostgreSQL password |
 
 ### Optional Keys
 
@@ -589,6 +678,7 @@ The codebase uses a dual-path system for secrets: tries `streamlit.st.secrets[ke
 | `EMAIL_USER` | None | SMTP username |
 | `EMAIL_PASSWORD` | None | SMTP password (Gmail app password) |
 | `SKIP_AUTH` | None | Set to `true` to bypass Streamlit auth (local dev only) |
+| `SUPABASE_DB_HOST` | `db.qbidzaweiypqaufdwqcl.supabase.co` | Supabase database host |
 
 ### Google Sheets (Streamlit Cloud only)
 
