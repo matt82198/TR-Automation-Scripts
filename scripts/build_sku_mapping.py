@@ -1345,6 +1345,21 @@ def main():
 
     print(f"\nWrote {len(mappings)} mappings to: {args.output}")
 
+    # Also write simple format for squarespace_to_quickbooks.py compatibility
+    simple_output = 'config/sku_mapping.csv'
+    with open(simple_output, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['SquarespaceProductName', 'QuickBooksItem'])
+        for m in mappings:
+            if m['quickbooks_item'] and m['quickbooks_item'] != 'MISCELLANOUS LEATHER':
+                # Format: "Product Name - Variant" or just "Product Name"
+                if m['squarespace_variant']:
+                    sq_name = f"{m['squarespace_product']} - {m['squarespace_variant']}"
+                else:
+                    sq_name = m['squarespace_product']
+                writer.writerow([sq_name, m['quickbooks_item']])
+    print(f"Wrote simple format to: {simple_output}")
+
     # Summary by product type
     print("\n=== Summary by Product Type ===")
     by_type = {}

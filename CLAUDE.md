@@ -23,8 +23,7 @@ Streamlit dashboard and CLI toolset for Tannery Row, a leather goods company. Th
 | `swatch_book_contents.py` | Streamlit only | Generate swatch book reference PDF |
 | `materialbank_method.py` | Streamlit only | Import Material Bank leads into Method CRM |
 | `email_helper.py` | Internal module | Email delivery (used by `squarespace_to_quickbooks.py`) |
-| `build_sku_mapping.py` | CLI only | Analyze orders and generate/validate SKU mappings |
-| `migrate_mappings.py` | CLI only | Merge old mapping files into consolidated format |
+| `build_sku_mapping.py` | CLI only | Analyze orders and generate SKU mappings (outputs both detailed and simple formats) |
 | `stripe_invoices.py` | **Deprecated** | Replaced by `payment_fetch.py` |
 
 ---
@@ -326,10 +325,6 @@ Persistent data storage abstraction. Uses Google Sheets on Streamlit Cloud, fall
 - `load_coefficients()` / `save_coefficients()` - Weight coefficients
 - `log_activity()` - Activity audit log
 - **Sheet worksheets:** `import_log`, `missing_inventory`, `leather_coefficients`, `activity_log`
-
-### `utils/generate_product_mappings.py`
-
-Generates SKU mappings from Squarespace product names using regex-based parsing. Extracts leather type, weight, color, and variant from product titles.
 
 ### `utils/database.py`
 
