@@ -484,9 +484,9 @@ Squarespace uses whole ranges (3-4 oz) but QB items may use half-ounce variants.
 
 ### Known Tannages by Brand
 
-**Horween:** Dublin, Derby, Essex, Chromexcel (Chrxl), Cavalier, Cavalier Chromexcel, Montana, Predator, Latigo, Illini Latigo, Vermont, Aspen, Krypto, Cypress, Pinnacle, Dearborn, Orion, Legacy, Plainsman, Buckaroo, LaSalle, Glove, Featherlite, Rockford, Yellowstone, Puttman, Russet Horsehide, Horsebutt, Handstained
+**Horween:** Dublin, Derby, Essex, Chromexcel (Chrxl), Cavalier, Cavalier Chromexcel, Montana, Montana Bison, Predator, Latigo, Illini Latigo, Vermont, Aspen, Krypto, Cypress, Pinnacle, Dearborn, Orion, Legacy, Plainsman, Buckaroo, LaSalle, Glove, Featherlite, Rockford, Yellowstone, Puttman, Russet Horsehide, Horsebutt, Handstained, Chamois, Chromepak, Pioneer Reindeer, Grand Slam
 
-**C.F. Stead:** Waxy Commander, Waxy Mohawk, Kudu Waxy, Kudu Classic, Kudu Reverse, Crazy Cow, Doeskin, Suede, Regency Calf
+**C.F. Stead:** Waxy Commander, Waxy Mohawk, Waxed Elk, Kudu Waxy, Kudu Classic, Kudu Reverse, Crazy Cow, Doeskin, Suede, Regency Calf, Rambler, Desert Oasis Suede, Janus Calf, Repello
 
 **Walpier/Italian:** Buttero, Baku, Elbamatt, Maine, Margot, Vachetta, Tuscany, Museum, Rocky, Sierra, Fenice, Smoked Matte
 
@@ -494,17 +494,19 @@ Squarespace uses whole ranges (3-4 oz) but QB items may use half-ounce variants.
 
 **Virgilio:** Pierrot Lux
 
-**Tusting & Burnett:** Mad Dog, Sokoto, Sokoto Bookbinding, Sokoto Dip
+**Tusting & Burnett:** Mad Dog, Sokoto, Sokoto Bookbinding, Sokoto Dip, Marsh
 
-**Splenda:** Classic (Splenda Classic)
+**Splenda:** Classic (Splenda Classic), Atlanta, BOM, Kansas, Sole Bends
 
-**Arazzo (upholstery):** Alaska, Abilene, Allure, Amalfi, Portsmouth, Boulder, Barbary
+**Arazzo (upholstery):** Alaska, Abilene, Allure, Amalfi, Portsmouth, Boulder, Barbary, Impression, Lucca, Sonoma, Hair-on-Hides
 
-**Other:** Country Cow, Glovey (lining), Italian Nubuck, Italian Crocco, Italian Crinkle
+**Onda Verde:** Monroe Calf, Metal Antique, Amalfi Lux, Gunmetal
+
+**Other:** Country Cow, Glovey (lining), Italian Nubuck, Italian Crocco, Italian Crinkle, Italian Softee, Nappa Lamb
 
 ### Known Brands
 
-Horween, Tempesti, Walpier/Conceria Walpier, Virgilio, Splenda, Tusting & Burnett, C.F. Stead, Onda Verde, Arazzo
+Horween, Tempesti, Walpier/Conceria Walpier, Virgilio, Splenda, Tusting & Burnett, C.F. Stead, Onda Verde, Arazzo, Les Rives, Country Cow, Nappa Lamb
 
 ### Product Types Detected
 
@@ -520,35 +522,37 @@ Horween, Tempesti, Walpier/Conceria Walpier, Virgilio, Splenda, Tusting & Burnet
 | lining | "lining", "calf lining" | Matches Glovey lining items |
 | bookbinding | "bookbinding" | Matches Sokoto Bookbinding items |
 | mystery_bundle | "mystery bundle", "mystery leather" | Falls back to MISCELLANEOUS |
-| scrap | "scrap" in name | Falls back to MISCELLANEOUS |
+| scrap | "scrap" in name | Maps to "Scrap Leather" |
+| merchandise | "t-shirt", "tri-blend", "shoe horn", "waxed canvas" | Excluded (non-leather) |
 | full_hide | default | Standard tannage/color/weight matching |
 
-### Match Rate by Product Type (1000 orders)
+### Match Rate by Product Type (3000 orders)
 
 | Product Type | Match Rate | Notes |
 |--------------|------------|-------|
-| Accessories | 100% | Tokonole, Ecostick, Saphir, Conditioner matched |
-| Strips | 100% | Russet HR/SR 9+ oz, Handstained, Horsebutt all matched |
-| Panels | 100% | Lt Nat abbreviation handled |
-| Horsefronts | 100% | SHF maps to DHF equivalent (half price billing) |
-| Full hides | 100% | Direct match or closest weight fallback |
-| Sample books | 100% | Brand-specific matching (T&B, Les Rives, Onda Verde) |
-| Lining | 100% | Glovey Calf Lining matching |
-| Sports | 100% | Basketball (default 5oz), Football matching |
-| Bookbinding | 100% | Sokoto Bookbinding (short "Book" and long form) |
-| Scrap | 100% | Maps to "Scrap Leather" |
-| Mystery bundles | 7% | Only "Mystery Leather Panels" needs mapping, rest deprecated |
+| Accessories | 86/86 (100%) | Tokonole, Ecostick, Saphir, Conditioner, Wallets matched |
+| Strips | 24/24 (100%) | Russet HR/SR 9+ oz, Handstained, Horsebutt all matched |
+| Panels | 155/155 (100%) | Lt Nat abbreviation handled, Cavalier Chrxl panels |
+| Horsefronts | 37/37 (100%) | SHF maps to DHF equivalent (half price billing) |
+| Full hides | 498/498 (100%) | Direct match or closest weight fallback |
+| Sample books | 57/57 (100%) | Brand-specific matching (T&B, Les Rives, Onda Verde) |
+| Lining | 5/5 (100%) | Glovey Calf Lining matching |
+| Sports | 4/4 (100%) | Basketball (default 5oz), Football matching |
+| Bookbinding | 5/5 (100%) | Sokoto Bookbinding (short "Book" and long form) |
+| Scrap | 4/4 (100%) | Maps to "Scrap Leather" |
+| Merchandise | 0/20 (0%) | T-shirts, shoe horns - excluded from mapping |
+| Mystery bundles | 1/17 (6%) | Only "Mystery Leather Panels" needs mapping, rest deprecated |
 
-**Overall: 457/498 (92%) exact match, 7 (1%) closest match (needs review), 20 (4%) MISCELLANEOUS, 14 deprecated**
+**Overall: 806/912 (88%) exact match, 21 (2%) closest match (needs review), 49 (5%) MISCELLANEOUS, 36 excluded**
 
 ### Match Types
 
 | Type | Percentage | Description |
 |------|------------|-------------|
-| Exact Match | 92% | All components match (tannage, color, weight, type) |
-| Closest Match | 1% | Tannage+color match, weight unavailable - flagged `needs_review=Y` |
-| MISCELLANEOUS | 4% | No match found - flagged `needs_qb_item=Y` |
-| Deprecated | 3% | Previous year sale items - excluded from output |
+| Exact Match | 88% | All components match (tannage, color, weight, type) |
+| Closest Match | 2% | Tannage+color match, weight unavailable - flagged `needs_review=Y` |
+| MISCELLANEOUS | 5% | No match found - flagged `needs_qb_item=Y` |
+| Excluded | 4% | Previous year sales + merchandise - not in output |
 
 **Closest Match items** are typically Tempesti leathers where QB only has one weight available (e.g., Elbamatt 4.5-5 oz) but Squarespace has a different weight (1.0-1.2mm). These are matched to the available weight and flagged for review.
 
@@ -564,6 +568,10 @@ The following are automatically skipped (return None, not included in output CSV
   - Horsefront Mystery Bundle (legacy versions)
   - Any mystery bundle that is NOT "Mystery Leather Panels"
 - **Gift Card Redemption** - Only occurs for walk-in sales, not online billing
+- **Merchandise** - Non-leather products:
+  - Tannery Row Cotton T-Shirt, Tri-Blend T-Shirt
+  - Highland Cordovan Shoe Horn
+  - Red House Waxed Canvas Satchel
 
 **Exception:** "Mystery Leather Panels" IS included and maps to `MISCELLANOUS LEATHER` (needs QB item).
 

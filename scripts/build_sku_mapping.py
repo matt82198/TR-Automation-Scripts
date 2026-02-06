@@ -74,6 +74,7 @@ TANNAGES = [
     'Rockford',
     'Yellowstone',
     'Puttman',
+    'Chamois', 'Chromepak', 'Pioneer Reindeer', 'Grand Slam', 'Montana Bison',
     'Regency', 'Regency Calf',
     'Buttero',
     'Baku',
@@ -93,18 +94,21 @@ TANNAGES = [
     'Kudu Waxy', 'Kudu Classic', 'Kudu Reverse', 'Kudu',
     'Crazy Cow',
     # Tusting & Burnett tannages
-    'Mad Dog', 'Sokoto', 'Sokoto Bookbinding', 'Sokoto Dip',
+    'Mad Dog', 'Sokoto', 'Sokoto Bookbinding', 'Sokoto Dip', 'Marsh',
     # Splenda tannages
-    'Classic', 'Splenda Classic',
+    'Classic', 'Splenda Classic', 'Atlanta', 'BOM', 'Kansas', 'Sole Bends',
     # C.F. Stead additional
-    'Waxy Mohawk',
+    'Waxy Mohawk', 'Waxed Elk', 'Rambler', 'Desert Oasis Suede', 'Janus Calf', 'Repello',
     # Arazzo tannages (upholstery)
     'Alaska', 'Abilene', 'Allure', 'Amalfi', 'Antique Retro', 'Barbary', 'Bayou', 'Boulder',
-    'Portsmouth',
+    'Portsmouth', 'Impression', 'Lucca', 'Sonoma', 'Hair-on-Hide', 'Hair-on-Hides',
     # Virgilio tannages
     'Pierrot Lux', 'Pierrot',
     # Italian misc
     'Nubuck', 'Italian Nubuck', 'Crocco', 'Italian Crocco', 'Crinkle', 'Italian Crinkle',
+    'Softee', 'Italian Softee', 'Gunmetal', 'Amalfi Lux',
+    'Metal Antique', 'Monroe Calf', 'Monroe',
+    'Smoked Mat',
     # Material types (for strips)
     'Russet Horsehide', 'Horsehide', 'Horsebutt', 'Handstained',
     # Calf lining
@@ -126,7 +130,7 @@ COLORS = [
     'Color #8', 'Color 8', '#8',
     'Cobalt Blue', 'Ink Blue', 'Fun Blue',
     'Golf Green',
-    'London Bus Red', 'Lollipop Red',
+    'London Bus Red', 'Lollipop Red', 'Marlboro Red', 'Cherry',
     'Burnt Orange',
     'Olde English', 'Olde Eng',  # QB abbreviation
     'Russet Brown',
@@ -142,6 +146,7 @@ COLORS = [
     # Italian colors
     'Alloro', 'Cammello', 'Ambra', 'Fieno', 'T. Moro',
     'Cobalto', 'Olmo', 'Castagna', 'Siena', 'Girasole', 'Topo',
+    'Prato', 'Olivo', 'Vittoria', 'Corcovado', 'Lilla',
     # C.F. Stead colors
     'Mole', 'Snuff', 'Wheatbuck',
     # Mad Dog colors
@@ -152,9 +157,13 @@ COLORS = [
     'Faggio', 'British Tan',
     # Racing colors (bookbinding)
     'Racing Green', 'Midnight Navy', 'Cranberry', 'Azure',
+    # Nappa/specialty colors
+    'Blackout', 'Murano', 'Life Boat', 'Chicago Blue', 'London', 'Garden',
     # Kudu/Stead colors
     'Deep Forest', 'Baltic', 'Loden', 'Autumn Spice', 'Caramel',
-    'Teak', 'Bitter Chocolate', 'Brandy', 'Cloud',
+    'Teak', 'Bitter Chocolate', 'Brandy', 'Cloud', 'Stone', 'Winter Smoke', 'Polo Brown',
+    # T&B colors
+    'Cappuccino', 'Flint', 'Autumn',
     # More accessory colors
     'Coach',
 ]
@@ -272,6 +281,12 @@ def parse_squarespace_product(product_name: str, variant: str = '') -> Optional[
         product_type = 'scrap'
     elif 'bookbinding' in name_lower:
         product_type = 'bookbinding'
+    elif 't-shirt' in name_lower or 'tee' in name_lower or 'tri-blend' in name_lower or 'cotton t' in name_lower:
+        product_type = 'merchandise'
+    elif 'shoe horn' in name_lower or 'shoehorn' in name_lower:
+        product_type = 'merchandise'
+    elif 'waxed canvas' in name_lower or 'satchel' in name_lower:
+        product_type = 'merchandise'
 
     # Detect brand
     brand = ''
@@ -291,6 +306,14 @@ def parse_squarespace_product(product_name: str, variant: str = '') -> Optional[
         brand = 'Tusting & Burnett'
     elif 'c.f. stead' in full_name.lower() or 'cf stead' in full_name.lower():
         brand = 'CF Stead'
+    elif 'les rives' in full_name.lower():
+        brand = 'Les Rives'
+    elif 'arazzo' in full_name.lower():
+        brand = 'Arazzo'
+    elif 'nappa lamb' in full_name.lower():
+        brand = 'Italian'
+    elif 'country cow' in full_name.lower():
+        brand = 'Country Cow'
 
     # Find tannage
     tannage = ''
@@ -836,6 +859,10 @@ def find_qb_match(components: LeatherComponents, qb_items: List[Dict], product_n
             return 'MISCELLANOUS LEATHER'
         # Other mystery bundles are previous years' sales - skip/ignore
         return None  # Deprecated - previous year sale items
+
+    # Handle merchandise (T-shirts, non-leather items)
+    if components.product_type == 'merchandise':
+        return None  # Not leather - excluded from mapping
 
     # Skip items without enough components to match
     if not components.tannage or not components.color:
