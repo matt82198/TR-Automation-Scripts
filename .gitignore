@@ -119,3 +119,4 @@ nul
 # Test outputs
 output_test/
 secrets.json
+supabase.exe
