@@ -27,6 +27,7 @@ from auth import check_authentication, show_user_info_sidebar, get_secret
 from gsheets_storage import (
     load_missing_inventory, save_missing_inventory,
     load_coefficients, save_coefficients,
+    load_sample_inventory, save_sample_inventory,
     is_cloud_deployment, log_activity
 )
 
@@ -84,6 +85,10 @@ TOOL_CATEGORIES = {
     "Inventory & Shipping": {
         "icon": "🚚",
         "tools": {
+            "Sample Inventory": {
+                "description": "Track sample swatch availability by color",
+                "permission": "standard"
+            },
             "Leather Weight Calculator": {
                 "description": "Calculate box weights for shipping",
                 "permission": "standard"
@@ -1158,6 +1163,152 @@ elif tool == "Leather Weight Calculator":
                         st.caption(f"{data['sample_weight']} lbs / {data['sample_sqft']} sqft")
 
                 st.divider()
+
+
+elif tool == "Sample Inventory":
+    st.header("🚚 Sample Inventory")
+    st.markdown("Track the availability of sample swatches by color for each swatch book.")
+
+    SAMPLE_INVENTORY_FILE = Path(__file__).parent / "config" / "sample_inventory.csv"
+
+    # Load inventory into session state
+    if 'sample_inventory' not in st.session_state:
+        st.session_state.sample_inventory = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+
+    inventory = st.session_state.sample_inventory
+
+    # --- Sync from Website ---
+    with st.expander("Sync from Website", expanded=not inventory):
+        st.caption("Scrape the Tannery Row website to find new colors or detect removed ones.")
+        if st.button("Sync Now", type="primary"):
+            user_email = st.session_state.get("user_email", "local")
+            log_activity(user_email, "Sample Inventory", "sync", "website")
+
+            from swatch_book_contents import SwatchBookGenerator
+            with st.spinner("Scraping website for current colors..."):
+                generator = SwatchBookGenerator()
+                results = generator.run()
+
+            if not results:
+                st.error("Could not fetch swatch book data from the website.")
+            else:
+                # Build lookup of existing inventory
+                existing = {(item['swatch_book'], item['color']): item for item in inventory}
+                scraped_keys = set()
+
+                new_colors = []
+                for swatch_name, info in results.items():
+                    for color in info['colors']:
+                        key = (swatch_name, color)
+                        scraped_keys.add(key)
+                        if key not in existing:
+                            new_colors.append({
+                                'swatch_book': swatch_name,
+                                'color': color,
+                                'status': 'in_stock',
+                                'last_updated': datetime.now().strftime('%Y-%m-%d')
+                            })
+
+                # Colors in inventory but no longer on website
+                removed_keys = [k for k in existing if k not in scraped_keys]
+
+                # Apply changes
+                updated = [item for item in inventory if (item['swatch_book'], item['color']) in scraped_keys]
+                updated.extend(new_colors)
+
+                st.session_state.sample_inventory = updated
+                save_sample_inventory(updated, SAMPLE_INVENTORY_FILE)
+
+                if new_colors:
+                    st.success(f"Added {len(new_colors)} new color(s)")
+                    for c in new_colors:
+                        st.write(f"  + {c['swatch_book']} - {c['color']}")
+                if removed_keys:
+                    st.warning(f"Removed {len(removed_keys)} color(s) no longer on website")
+                    for sb, color in removed_keys:
+                        st.write(f"  - {sb} - {color}")
+                if not new_colors and not removed_keys:
+                    st.info("Inventory is already up to date.")
+
+                inventory = st.session_state.sample_inventory
+                st.rerun()
+
+    if not inventory:
+        st.info("No sample inventory data yet. Use **Sync from Website** above to populate.")
+    else:
+        # Summary metrics
+        total = len(inventory)
+        in_stock = sum(1 for i in inventory if i['status'] == 'in_stock')
+        low_stock = sum(1 for i in inventory if i['status'] == 'low_stock')
+        out_of_stock = sum(1 for i in inventory if i['status'] == 'out_of_stock')
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Colors", total)
+        m2.metric("In Stock", in_stock)
+        m3.metric("Low Stock", low_stock)
+        m4.metric("Out of Stock", out_of_stock)
+
+        st.divider()
+
+        # Group by tannery and swatch book
+        from collections import defaultdict
+        by_tannery = defaultdict(lambda: defaultdict(list))
+        for item in inventory:
+            sb = item['swatch_book']
+            # Extract tannery from swatch book name (first word)
+            parts = sb.split(' ', 1)
+            tannery = parts[0] if parts else 'Other'
+            by_tannery[tannery][sb].append(item)
+
+        STATUS_OPTIONS = ['in_stock', 'low_stock', 'out_of_stock']
+        STATUS_LABELS = {'in_stock': 'In Stock', 'low_stock': 'Low Stock', 'out_of_stock': 'Out of Stock'}
+        STATUS_COLORS = {'in_stock': '🟢', 'low_stock': '🟡', 'out_of_stock': '🔴'}
+
+        changed = False
+
+        for tannery in sorted(by_tannery.keys()):
+            swatch_books = by_tannery[tannery]
+            with st.expander(f"**{tannery}** ({sum(len(colors) for colors in swatch_books.values())} colors)", expanded=False):
+                for sb_name in sorted(swatch_books.keys()):
+                    colors = swatch_books[sb_name]
+                    # Swatch book sub-header with status summary
+                    sb_out = sum(1 for c in colors if c['status'] == 'out_of_stock')
+                    sb_low = sum(1 for c in colors if c['status'] == 'low_stock')
+                    suffix = ""
+                    if sb_out:
+                        suffix += f" | 🔴 {sb_out}"
+                    if sb_low:
+                        suffix += f" | 🟡 {sb_low}"
+
+                    leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
+                    st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
+
+                    for color_item in sorted(colors, key=lambda x: x['color']):
+                        col1, col2 = st.columns([3, 2])
+                        with col1:
+                            current = color_item['status']
+                            st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}")
+                        with col2:
+                            key = f"si_{sb_name}_{color_item['color']}"
+                            new_status = st.selectbox(
+                                "Status",
+                                STATUS_OPTIONS,
+                                index=STATUS_OPTIONS.index(current),
+                                format_func=lambda x: STATUS_LABELS[x],
+                                key=key,
+                                label_visibility="collapsed"
+                            )
+                            if new_status != current:
+                                color_item['status'] = new_status
+                                color_item['last_updated'] = datetime.now().strftime('%Y-%m-%d')
+                                changed = True
+
+                    st.markdown("---")
+
+        if changed:
+            st.session_state.sample_inventory = inventory
+            save_sample_inventory(inventory, SAMPLE_INVENTORY_FILE)
+            st.toast("Sample inventory updated!")
 
 
 elif tool == "Swatch Book Generator":

@@ -443,6 +443,87 @@ def log_activity(user_email: str, tool: str, action: str, details: str = ""):
         pass
 
 
+# =============================================================================
+# Sample Inventory Storage
+# =============================================================================
+
+def load_sample_inventory_cloud() -> List[Dict[str, str]]:
+    """Load sample inventory from Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return []
+
+    try:
+        df = conn.read(worksheet="sample_inventory", ttl=0)
+        if df is not None and not df.empty:
+            return df.to_dict('records')
+    except Exception as e:
+        st.warning(f"Could not load sample inventory from Google Sheets: {e}")
+
+    return []
+
+
+def save_sample_inventory_cloud(inventory: List[Dict[str, str]]):
+    """Save sample inventory to Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return
+
+    try:
+        df = pd.DataFrame(inventory)
+        if df.empty:
+            df = pd.DataFrame(columns=['swatch_book', 'color', 'status', 'last_updated'])
+        conn.update(worksheet="sample_inventory", data=df)
+    except Exception as e:
+        st.warning(f"Could not save sample inventory: {e}")
+
+
+def load_sample_inventory_local(file_path: Path) -> List[Dict[str, str]]:
+    """Load sample inventory from local CSV file."""
+    inventory = []
+    if file_path.exists():
+        with open(file_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                inventory.append({
+                    'swatch_book': row['swatch_book'],
+                    'color': row['color'],
+                    'status': row.get('status', 'in_stock'),
+                    'last_updated': row.get('last_updated', '')
+                })
+    return inventory
+
+
+def save_sample_inventory_local(file_path: Path, inventory: List[Dict[str, str]]):
+    """Save sample inventory to local CSV file."""
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'status', 'last_updated'])
+        writer.writeheader()
+        for item in inventory:
+            writer.writerow(item)
+
+
+def load_sample_inventory(file_path: Optional[Path] = None) -> List[Dict[str, str]]:
+    """Load sample inventory from storage. Uses Google Sheets on cloud, local CSV otherwise."""
+    if is_cloud_deployment():
+        return load_sample_inventory_cloud()
+    elif file_path:
+        return load_sample_inventory_local(file_path)
+    return []
+
+
+def save_sample_inventory(inventory: List[Dict[str, str]], file_path: Optional[Path] = None):
+    """Save sample inventory to storage. Uses Google Sheets on cloud, local CSV otherwise."""
+    if is_cloud_deployment():
+        save_sample_inventory_cloud(inventory)
+    elif file_path:
+        save_sample_inventory_local(file_path, inventory)
+
+
+# =============================================================================
+# Activity Log Storage
+# =============================================================================
+
 def get_recent_activity(limit: int = 50) -> List[Dict]:
     """Get recent activity log entries."""
     if not is_cloud_deployment():
