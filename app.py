@@ -964,59 +964,59 @@ elif tool == "Manufacturing Inventory":
 
         pi_inventory = st.session_state.panel_inventory
 
-        with st.expander("Sync from Website", expanded=not pi_inventory):
-            st.caption("Scrape the Tannery Row website to find panel products and their colors.")
+        with st.expander("Sync from Orders", expanded=not pi_inventory):
+            st.caption("Pull panel products from pending Squarespace orders to discover new panel variants.")
             if st.button("Sync Panels", type="primary"):
                 user_email = st.session_state.get("user_email", "local")
                 log_activity(user_email, "Manufacturing Inventory", "sync", "panel inventory")
 
-                with st.spinner("Scraping website for panel products..."):
-                    generator = SwatchBookGenerator()
-                    results = generator.run_panels()
-
-                if not results:
-                    st.error("Could not fetch panel data from the website.")
+                api_key = get_secret("SQUARESPACE_API_KEY")
+                if not api_key:
+                    st.error("SQUARESPACE_API_KEY not set")
                 else:
-                    existing = {(item['swatch_book'], item['color']): item for item in pi_inventory}
-                    scraped_keys = set()
+                    with st.spinner("Fetching panel products from orders..."):
+                        calculator = SquarespacePanelCalculator(api_key)
+                        product_counts = calculator.get_product_counts()
 
-                    new_colors = []
-                    for panel_name, info in results.items():
-                        for color in info['colors']:
-                            key = (panel_name, color)
-                            scraped_keys.add(key)
+                    panel_details = product_counts["panels"]["details"]
+                    if not panel_details:
+                        st.info("No panel products found in pending orders.")
+                    else:
+                        existing = {(item['swatch_book'], item['color']): item for item in pi_inventory}
+
+                        new_colors = []
+                        for unique_id, details in panel_details.items():
+                            product_name = details['product_name']
+                            variant_desc = details['variant_description']
+                            # Extract color from variant description (e.g. "Color: Black - Weight: 3-4 oz")
+                            color = variant_desc
+                            for part in variant_desc.split(' - '):
+                                if part.strip().startswith('Color:'):
+                                    color = part.replace('Color:', '').strip()
+                                    break
+
+                            key = (product_name, color)
                             if key not in existing:
                                 new_colors.append({
-                                    'swatch_book': panel_name,
+                                    'swatch_book': product_name,
                                     'color': color,
                                     'status': 'in_stock',
                                     'last_updated': datetime.now().strftime('%Y-%m-%d')
                                 })
 
-                    removed_keys = [k for k in existing if k not in scraped_keys]
-
-                    updated = [item for item in pi_inventory if (item['swatch_book'], item['color']) in scraped_keys]
-                    updated.extend(new_colors)
-
-                    st.session_state.panel_inventory = updated
-                    save_panel_inventory(updated, PANEL_INVENTORY_FILE)
-
-                    if new_colors:
-                        st.success(f"Added {len(new_colors)} new panel color(s)")
-                        for c in new_colors:
-                            st.write(f"  + {c['swatch_book']} - {c['color']}")
-                    if removed_keys:
-                        st.warning(f"Removed {len(removed_keys)} panel color(s) no longer on website")
-                        for sb, color in removed_keys:
-                            st.write(f"  - {sb} - {color}")
-                    if not new_colors and not removed_keys:
-                        st.info("Panel inventory is already up to date.")
-
-                    pi_inventory = st.session_state.panel_inventory
-                    st.rerun()
+                        if new_colors:
+                            pi_inventory.extend(new_colors)
+                            st.session_state.panel_inventory = pi_inventory
+                            save_panel_inventory(pi_inventory, PANEL_INVENTORY_FILE)
+                            st.success(f"Added {len(new_colors)} new panel variant(s)")
+                            for c in new_colors:
+                                st.write(f"  + {c['swatch_book']} - {c['color']}")
+                            st.rerun()
+                        else:
+                            st.info("Panel inventory is already up to date.")
 
         if not pi_inventory:
-            st.info("No panel inventory data yet. Use **Sync from Website** above to populate.")
+            st.info("No panel inventory data yet. Use **Sync from Orders** above to populate.")
         else:
             total = len(pi_inventory)
             in_stock = sum(1 for i in pi_inventory if i['status'] == 'in_stock')
