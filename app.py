@@ -1017,7 +1017,16 @@ elif tool == "Manufacturing Inventory":
 
         # --- Regular Panels ---
         if 'panel_inventory' not in st.session_state:
-            st.session_state.panel_inventory = load_panel_inventory(PANEL_INVENTORY_FILE)
+            raw = load_panel_inventory(PANEL_INVENTORY_FILE)
+            # Deduplicate by (swatch_book, color)
+            seen = set()
+            deduped = []
+            for item in raw:
+                key = (item['swatch_book'], item['color'])
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(item)
+            st.session_state.panel_inventory = deduped
 
         pi_inventory = st.session_state.panel_inventory
 
@@ -1148,7 +1157,15 @@ elif tool == "Manufacturing Inventory":
         st.markdown("Track sample swatch availability by color for each swatch book.")
 
         if 'sample_inventory' not in st.session_state:
-            st.session_state.sample_inventory = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+            raw = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+            seen = set()
+            deduped = []
+            for item in raw:
+                key = (item['swatch_book'], item['color'])
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(item)
+            st.session_state.sample_inventory = deduped
 
         si_inventory = st.session_state.sample_inventory
 
@@ -1285,7 +1302,15 @@ elif tool == "Manufacturing Inventory":
 
         # Load sample inventory for dropdown options
         if 'sample_inventory' not in st.session_state:
-            st.session_state.sample_inventory = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+            raw = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+            seen = set()
+            deduped = []
+            for item in raw:
+                key = (item['swatch_book'], item['color'])
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(item)
+            st.session_state.sample_inventory = deduped
 
         si_data = st.session_state.sample_inventory
         if not si_data:
