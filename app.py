@@ -29,6 +29,7 @@ from gsheets_storage import (
     load_coefficients, save_coefficients,
     load_sample_inventory, save_sample_inventory,
     load_panel_inventory, save_panel_inventory,
+    load_mystery_panel_count, save_mystery_panel_count,
     is_cloud_deployment, log_activity
 )
 
@@ -959,6 +960,28 @@ elif tool == "Manufacturing Inventory":
     with tab_panels:
         st.markdown("Track panel availability by color for each leather type.")
 
+        # --- Mystery Panels ---
+        MYSTERY_PANEL_FILE = Path(__file__).parent / "config" / "mystery_panel_count.txt"
+
+        if 'mystery_panel_count' not in st.session_state:
+            st.session_state.mystery_panel_count = load_mystery_panel_count(MYSTERY_PANEL_FILE)
+
+        st.subheader("Mystery Panels")
+        mystery_count = st.number_input(
+            "Ready to ship",
+            min_value=0,
+            value=st.session_state.mystery_panel_count,
+            step=1,
+            key="mystery_panel_input"
+        )
+        if mystery_count != st.session_state.mystery_panel_count:
+            st.session_state.mystery_panel_count = mystery_count
+            save_mystery_panel_count(mystery_count, MYSTERY_PANEL_FILE)
+            st.toast("Mystery panel count updated!")
+
+        st.divider()
+
+        # --- Regular Panels ---
         if 'panel_inventory' not in st.session_state:
             st.session_state.panel_inventory = load_panel_inventory(PANEL_INVENTORY_FILE)
 

@@ -521,6 +521,54 @@ def save_sample_inventory(inventory: List[Dict[str, str]], file_path: Optional[P
 
 
 # =============================================================================
+# Mystery Panel Count Storage
+# =============================================================================
+
+def load_mystery_panel_count_cloud() -> int:
+    conn = get_gsheets_connection()
+    if not conn:
+        return 0
+    try:
+        df = conn.read(worksheet="mystery_panel_count", ttl=0)
+        if df is not None and not df.empty and 'count' in df.columns:
+            return int(df.iloc[0]['count'])
+    except Exception:
+        pass
+    return 0
+
+
+def save_mystery_panel_count_cloud(count: int):
+    conn = get_gsheets_connection()
+    if not conn:
+        return
+    try:
+        df = pd.DataFrame([{'count': count}])
+        conn.update(worksheet="mystery_panel_count", data=df)
+    except Exception:
+        pass
+
+
+def load_mystery_panel_count(file_path: Optional[Path] = None) -> int:
+    if is_cloud_deployment():
+        return load_mystery_panel_count_cloud()
+    elif file_path and file_path.exists():
+        try:
+            with open(file_path, 'r') as f:
+                return int(f.read().strip())
+        except (ValueError, OSError):
+            pass
+    return 0
+
+
+def save_mystery_panel_count(count: int, file_path: Optional[Path] = None):
+    if is_cloud_deployment():
+        save_mystery_panel_count_cloud(count)
+    elif file_path:
+        with open(file_path, 'w') as f:
+            f.write(str(count))
+
+
+# =============================================================================
 # Panel Inventory Storage
 # =============================================================================
 
