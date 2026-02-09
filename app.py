@@ -787,21 +787,89 @@ elif tool == "Manufacturing Inventory":
     # Load cage inventory for cross-referencing across all tabs
     if 'cage_inventory' not in st.session_state:
         st.session_state.cage_inventory = load_cage_inventory(CAGE_INVENTORY_FILE)
-    cage_set = {(item['swatch_book'], item['color']) for item in st.session_state.cage_inventory}
+    # Build cage lookup: dict of (swatch_book, color) -> set of weights in cage
+    cage_lookup = defaultdict(set)
+    for item in st.session_state.cage_inventory:
+        cage_lookup[(item['swatch_book'], item['color'])].add(item.get('weight', ''))
 
-    def is_in_cage(product_name, color):
-        """Check if leather is available in the cage. Normalizes panel product names."""
+    def is_in_cage(product_name, color, weight=''):
+        """Check if leather is available in the cage. Normalizes panel product names.
+        Weight matching: cage entry with no weight matches anything. If cage has weight, must match."""
+        def _check(name, color, weight):
+            key = (name, color)
+            if key in cage_lookup:
+                cage_weights = cage_lookup[key]
+                # Cage entry with no weight = matches anything
+                if '' in cage_weights:
+                    return True
+                # If checking with a specific weight, must match
+                if weight and weight in cage_weights:
+                    return True
+                # If checking without weight (samples), match if any cage entry exists
+                if not weight:
+                    return True
+            return False
+
         # Direct match (sample inventory names like "Horween Dublin")
-        if (product_name, color) in cage_set:
+        if _check(product_name, color, weight):
             return True
         # Strip " Leather Panels" for panel product names
         normalized = product_name.replace(" Leather Panels", "").replace(" Leather Panel", "")
         # Also strip brand bullet separators (e.g. "Horween • Dublin" -> check both forms)
         for sep in [' • ', ' \u2022 ', ' - ']:
             normalized = normalized.replace(sep, ' ')
-        if (normalized, color) in cage_set:
+        if _check(normalized, color, weight):
             return True
         return False
+
+    def get_item_readiness(product_name, variant_desc, item_type='panel'):
+        """Determine readiness of a pending order item from inventory data.
+        Returns (icon, label) tuple."""
+        # Parse color and weight from variant description
+        color = ''
+        weight = ''
+        for part in variant_desc.split(' - '):
+            part = part.strip()
+            if part.startswith('Color:'):
+                color = part.replace('Color:', '').strip()
+            elif part.startswith('Weight:'):
+                weight = part.replace('Weight:', '').strip()
+        if not color:
+            color = variant_desc
+
+        # Check cage first (highest priority - ready to cut)
+        if color and is_in_cage(product_name, color, weight):
+            return '📦', 'In Cage'
+
+        # Check panel or sample inventory
+        if item_type == 'panel':
+            pi = st.session_state.get('panel_inventory', [])
+            for item in pi:
+                name_match = item['swatch_book'] == product_name
+                color_match = item['color'] == color
+                weight_match = (not weight or not item.get('weight')) or item.get('weight', '') == weight
+                if name_match and color_match and weight_match:
+                    status = item['status']
+                    if status == 'in_stock':
+                        return '🟢', 'In Stock'
+                    elif status == 'low_stock':
+                        return '🟡', 'Low Stock'
+                    else:
+                        return '🔴', 'Out of Stock'
+        else:  # swatch book
+            si = st.session_state.get('sample_inventory', [])
+            # Normalize product name for sample matching (strip "Swatch Book -" etc.)
+            for item in si:
+                if item['color'] == color and product_name.endswith(item['swatch_book']):
+                    status = item['status']
+                    if status == 'in_stock':
+                        return '🟢', 'In Stock'
+                    elif status == 'low_stock':
+                        return '🟡', 'Low Stock'
+                    else:
+                        return '🔴', 'Out of Stock'
+
+        return '⬜', 'Not Tracked'
 
     tab_pending, tab_panels, tab_samples, tab_cage = st.tabs(["Pending Orders", "Panel Inventory", "Sample Inventory", "Cage Inventory"])
 
@@ -809,11 +877,7 @@ elif tool == "Manufacturing Inventory":
     # TAB 1: Pending Orders (existing functionality)
     # =========================================================================
     with tab_pending:
-        st.markdown("Count pending panels and swatch books from Squarespace orders.")
-
-        # Initialize session state for missing items
-        if 'missing_inventory' not in st.session_state:
-            st.session_state.missing_inventory = load_missing_inventory(MISSING_INVENTORY_FILE)
+        st.markdown("Priority list for pending panels and swatch books. Status is pulled from inventory.")
 
         col1, col2 = st.columns([1, 3])
         with col1:
@@ -843,43 +907,37 @@ elif tool == "Manufacturing Inventory":
             panels = product_counts["panels"]
             swatch_books = product_counts["swatch_books"]
             by_order = product_counts.get("by_order", {})
-            missing = st.session_state.missing_inventory
-
-            # Track changes
-            updated_missing = set(missing)
 
             if view_mode == "Total Counts":
-                st.markdown("**Check items that are missing/out of stock** to prioritize production.")
+                # Readiness priority order for sorting: Out of Stock > Not Tracked > Low Stock > In Stock > In Cage
+                READINESS_SORT = {'🔴': 0, '⬜': 1, '🟡': 2, '🟢': 3, '📦': 4}
 
                 # Panels section
                 st.subheader("Panels")
                 if panels["counts"]:
                     panel_total = sum(panels["counts"].values())
-                    missing_panel_count = sum(
-                        panels["counts"][uid] for uid in panels["counts"] if uid in missing
-                    )
-                    st.metric("Total Panels Needed", panel_total,
-                              delta=f"{missing_panel_count} missing" if missing_panel_count else None,
-                              delta_color="inverse")
+
+                    # Calculate readiness stats
+                    panel_readiness = {}
+                    for uid in panels["counts"]:
+                        d = panels["details"][uid]
+                        icon, _ = get_item_readiness(d['product_name'], d['variant_description'], 'panel')
+                        panel_readiness[uid] = icon
+
+                    ready_count = sum(panels["counts"][uid] for uid in panels["counts"] if panel_readiness[uid] in ('📦', '🟢'))
+                    not_ready_count = panel_total - ready_count
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Total Panels Needed", panel_total)
+                    c2.metric("Ready", ready_count)
+                    c3.metric("Not Ready", not_ready_count)
 
                     for unique_id, count in sorted(panels["counts"].items(),
-                                                   key=lambda x: x[0] in missing,
-                                                   reverse=True):
+                                                   key=lambda x: READINESS_SORT.get(panel_readiness[x[0]], 5)):
                         details = panels["details"][unique_id]
                         variant_info = f" ({details['variant_description']})" if details['variant_description'] else ""
-                        label = f"{details['product_name']}{variant_info} - **{count}** needed"
-
-                        is_missing = st.checkbox(
-                            label,
-                            value=unique_id in missing,
-                            key=f"panel_{unique_id}",
-                            help="Check if this item is out of stock"
-                        )
-
-                        if is_missing:
-                            updated_missing.add(unique_id)
-                        else:
-                            updated_missing.discard(unique_id)
+                        icon, label = get_item_readiness(details['product_name'], details['variant_description'], 'panel')
+                        st.markdown(f"{icon} {details['product_name']}{variant_info} - **{count}** needed — *{label}*")
                 else:
                     st.info("No panels in pending orders")
 
@@ -889,97 +947,89 @@ elif tool == "Manufacturing Inventory":
                 st.subheader("Swatch Books")
                 if swatch_books["counts"]:
                     swatch_total = sum(swatch_books["counts"].values())
-                    missing_swatch_count = sum(
-                        swatch_books["counts"][uid] for uid in swatch_books["counts"] if uid in missing
-                    )
-                    st.metric("Total Swatch Books Needed", swatch_total,
-                              delta=f"{missing_swatch_count} missing" if missing_swatch_count else None,
-                              delta_color="inverse")
+
+                    swatch_readiness = {}
+                    for uid in swatch_books["counts"]:
+                        d = swatch_books["details"][uid]
+                        icon, _ = get_item_readiness(d['product_name'], d['variant_description'], 'swatch_book')
+                        swatch_readiness[uid] = icon
+
+                    ready_count = sum(swatch_books["counts"][uid] for uid in swatch_books["counts"] if swatch_readiness[uid] in ('📦', '🟢'))
+                    not_ready_count = swatch_total - ready_count
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Total Swatch Books Needed", swatch_total)
+                    c2.metric("Ready", ready_count)
+                    c3.metric("Not Ready", not_ready_count)
 
                     for unique_id, count in sorted(swatch_books["counts"].items(),
-                                                   key=lambda x: x[0] in missing,
-                                                   reverse=True):
+                                                   key=lambda x: READINESS_SORT.get(swatch_readiness[x[0]], 5)):
                         details = swatch_books["details"][unique_id]
                         variant_info = f" ({details['variant_description']})" if details['variant_description'] else ""
-                        label = f"{details['product_name']}{variant_info} - **{count}** needed"
-
-                        is_missing = st.checkbox(
-                            label,
-                            value=unique_id in missing,
-                            key=f"swatch_{unique_id}",
-                            help="Check if this item is out of stock"
-                        )
-
-                        if is_missing:
-                            updated_missing.add(unique_id)
-                        else:
-                            updated_missing.discard(unique_id)
+                        icon, label = get_item_readiness(details['product_name'], details['variant_description'], 'swatch_book')
+                        st.markdown(f"{icon} {details['product_name']}{variant_info} - **{count}** needed — *{label}*")
                 else:
                     st.info("No swatch books in pending orders")
 
             else:  # By Order view
-                st.markdown("Items with missing stock are highlighted.")
+                st.markdown("Orders sorted by readiness — not-ready orders shown first.")
 
                 if by_order:
+                    READINESS_SORT = {'🔴': 0, '⬜': 1, '🟡': 2, '🟢': 3, '📦': 4}
+
+                    # Calculate per-order readiness
+                    order_readiness = {}
+                    for order_num, order_data in by_order.items():
+                        all_items = order_data["panels"] + order_data["swatch_books"]
+                        item_icons = []
+                        for item in all_items:
+                            itype = 'panel' if item in order_data["panels"] else 'swatch_book'
+                            icon, _ = get_item_readiness(item['product_name'], item['variant_description'], itype)
+                            item_icons.append(icon)
+
+                        if all(i in ('📦', '🟢') for i in item_icons):
+                            order_readiness[order_num] = ('✅', 'Ready')
+                        elif any(i in ('🔴', '⬜') for i in item_icons):
+                            order_readiness[order_num] = ('🔴', 'Not Ready')
+                        else:
+                            order_readiness[order_num] = ('🟡', 'Partial')
+
+                    # Sort: not ready first, then partial, then ready; within groups by date
+                    ORDER_SORT = {'🔴': 0, '🟡': 1, '✅': 2}
                     sorted_orders = sorted(by_order.items(),
-                                           key=lambda x: (x[1]["date"], x[0]))
+                                           key=lambda x: (ORDER_SORT.get(order_readiness[x[0]][0], 3), x[1]["date"], x[0]))
 
                     for order_num, order_data in sorted_orders:
-                        order_has_missing = any(
-                            item["unique_id"] in missing
-                            for item in order_data["panels"] + order_data["swatch_books"]
-                        )
-
-                        icon = "⚠️ " if order_has_missing else ""
-                        with st.expander(f"{icon}Order #{order_num} - {order_data['date']}", expanded=order_has_missing):
+                        r_icon, r_label = order_readiness[order_num]
+                        is_not_ready = r_icon != '✅'
+                        with st.expander(f"{r_icon} Order #{order_num} - {order_data['date']} — {r_label}", expanded=is_not_ready):
                             if order_data["panels"]:
                                 st.markdown("**Panels:**")
                                 for item in order_data["panels"]:
                                     variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
-                                    is_missing_item = item["unique_id"] in missing
-                                    marker = "🔴 " if is_missing_item else ""
-                                    # Check cage by extracting color from variant description
-                                    item_color = ""
-                                    for part in item.get('variant_description', '').split(' - '):
-                                        if part.strip().startswith('Color:'):
-                                            item_color = part.replace('Color:', '').strip()
-                                            break
-                                    cage_icon = " 📦" if item_color and is_in_cage(item['product_name'], item_color) else ""
-                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}{cage_icon}")
+                                    icon, label = get_item_readiness(item['product_name'], item['variant_description'], 'panel')
+                                    st.markdown(f"- {icon} {item['product_name']}{variant_info} x{item['quantity']} — *{label}*")
 
                             if order_data["swatch_books"]:
                                 st.markdown("**Swatch Books:**")
                                 for item in order_data["swatch_books"]:
                                     variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
-                                    is_missing_item = item["unique_id"] in missing
-                                    marker = "🔴 " if is_missing_item else ""
-                                    item_color = ""
-                                    for part in item.get('variant_description', '').split(' - '):
-                                        if part.strip().startswith('Color:'):
-                                            item_color = part.replace('Color:', '').strip()
-                                            break
-                                    cage_icon = " 📦" if item_color and is_in_cage(item['product_name'], item_color) else ""
-                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}{cage_icon}")
+                                    icon, label = get_item_readiness(item['product_name'], item['variant_description'], 'swatch_book')
+                                    st.markdown(f"- {icon} {item['product_name']}{variant_info} x{item['quantity']} — *{label}*")
                 else:
                     st.info("No orders with panels or swatch books")
 
-            # Save if changed
-            if updated_missing != missing:
-                st.session_state.missing_inventory = updated_missing
-                save_missing_inventory(updated_missing, MISSING_INVENTORY_FILE)
-                st.toast("Missing inventory updated!")
-
             # Download CSV button
             st.divider()
-            csv_lines = ["Type,Product,Variant,Quantity,Missing"]
+            csv_lines = ["Type,Product,Variant,Quantity,Status"]
             for unique_id, count in panels["counts"].items():
                 details = panels["details"][unique_id]
-                is_missing = "Yes" if unique_id in missing else "No"
-                csv_lines.append(f"Panel,{details['product_name']},{details['variant_description']},{count},{is_missing}")
+                _, label = get_item_readiness(details['product_name'], details['variant_description'], 'panel')
+                csv_lines.append(f"Panel,{details['product_name']},{details['variant_description']},{count},{label}")
             for unique_id, count in swatch_books["counts"].items():
                 details = swatch_books["details"][unique_id]
-                is_missing = "Yes" if unique_id in missing else "No"
-                csv_lines.append(f"Swatch Book,{details['product_name']},{details['variant_description']},{count},{is_missing}")
+                _, label = get_item_readiness(details['product_name'], details['variant_description'], 'swatch_book')
+                csv_lines.append(f"Swatch Book,{details['product_name']},{details['variant_description']},{count},{label}")
 
             st.download_button(
                 label="Download Pending Orders CSV",
@@ -1018,11 +1068,11 @@ elif tool == "Manufacturing Inventory":
         # --- Regular Panels ---
         if 'panel_inventory' not in st.session_state:
             raw = load_panel_inventory(PANEL_INVENTORY_FILE)
-            # Deduplicate by (swatch_book, color)
+            # Deduplicate by (swatch_book, color, weight)
             seen = set()
             deduped = []
             for item in raw:
-                key = (item['swatch_book'], item['color'])
+                key = (item['swatch_book'], item['color'], item.get('weight', ''))
                 if key not in seen:
                     seen.add(key)
                     deduped.append(item)
@@ -1048,35 +1098,42 @@ elif tool == "Manufacturing Inventory":
                     if not panel_details:
                         st.info("No panel products found in pending orders.")
                     else:
-                        existing = {(item['swatch_book'], item['color']): item for item in pi_inventory}
+                        existing = {(item['swatch_book'], item['color'], item.get('weight', '')): item for item in pi_inventory}
 
-                        new_colors = []
+                        new_variants = []
                         for unique_id, details in panel_details.items():
                             product_name = details['product_name']
                             variant_desc = details['variant_description']
-                            # Extract color from variant description (e.g. "Color: Black - Weight: 3-4 oz")
+                            # Extract color and weight from variant description
+                            # e.g. "Color: Black - Weight: 3-4 oz"
                             color = variant_desc
+                            weight = ''
                             for part in variant_desc.split(' - '):
-                                if part.strip().startswith('Color:'):
+                                part = part.strip()
+                                if part.startswith('Color:'):
                                     color = part.replace('Color:', '').strip()
-                                    break
+                                elif part.startswith('Weight:'):
+                                    weight = part.replace('Weight:', '').strip()
 
-                            key = (product_name, color)
+                            key = (product_name, color, weight)
                             if key not in existing:
-                                new_colors.append({
+                                existing[key] = True  # prevent dupes within same batch
+                                new_variants.append({
                                     'swatch_book': product_name,
                                     'color': color,
+                                    'weight': weight,
                                     'status': 'in_stock',
                                     'last_updated': datetime.now().strftime('%Y-%m-%d')
                                 })
 
-                        if new_colors:
-                            pi_inventory.extend(new_colors)
+                        if new_variants:
+                            pi_inventory.extend(new_variants)
                             st.session_state.panel_inventory = pi_inventory
                             save_panel_inventory(pi_inventory, PANEL_INVENTORY_FILE)
-                            st.success(f"Added {len(new_colors)} new panel variant(s)")
-                            for c in new_colors:
-                                st.write(f"  + {c['swatch_book']} - {c['color']}")
+                            st.success(f"Added {len(new_variants)} new panel variant(s)")
+                            for c in new_variants:
+                                weight_info = f" ({c['weight']})" if c['weight'] else ""
+                                st.write(f"  + {c['swatch_book']} - {c['color']}{weight_info}")
                             st.rerun()
                         else:
                             st.info("Panel inventory is already up to date.")
@@ -1122,14 +1179,16 @@ elif tool == "Manufacturing Inventory":
                         leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
                         st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
 
-                        for ci, color_item in enumerate(sorted(colors, key=lambda x: x['color'])):
+                        for ci, color_item in enumerate(sorted(colors, key=lambda x: (x['color'], x.get('weight', '')))):
                             col1, col2 = st.columns([3, 2])
                             with col1:
                                 current = color_item['status']
-                                cage_icon = " 📦" if is_in_cage(sb_name, color_item['color']) else ""
-                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}{cage_icon}")
+                                cage_icon = " 📦" if is_in_cage(sb_name, color_item['color'], color_item.get('weight', '')) else ""
+                                weight_label = f" - {color_item['weight']}" if color_item.get('weight') else ""
+                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}{weight_label}{cage_icon}")
                             with col2:
-                                key = f"pi_{sb_name}_{color_item['color']}_{ci}"
+                                weight_key = color_item.get('weight', '').replace(' ', '')
+                                key = f"pi_{sb_name}_{color_item['color']}_{weight_key}_{ci}"
                                 new_status = st.selectbox(
                                     "Status",
                                     STATUS_OPTIONS,
@@ -1327,19 +1386,33 @@ elif tool == "Manufacturing Inventory":
             ))
             selected_color = st.selectbox("Color", sb_colors, key="cage_color_select")
 
+            # Optional weight
+            weight_options = ["(none)", "3-4 oz", "5-6 oz"]
+            selected_weight = st.selectbox("Weight (optional)", weight_options, key="cage_weight_select")
+            cage_weight = "" if selected_weight == "(none)" else selected_weight
+
             if st.button("Add to Cage", type="primary"):
-                # Check if already in cage
-                if (selected_sb, selected_color) in cage_set:
-                    st.warning(f"{selected_sb} - {selected_color} is already in the cage.")
+                # Check if already in cage (same swatch_book + color + weight)
+                already = any(
+                    item['swatch_book'] == selected_sb
+                    and item['color'] == selected_color
+                    and item.get('weight', '') == cage_weight
+                    for item in cage_inventory
+                )
+                if already:
+                    weight_info = f" ({cage_weight})" if cage_weight else ""
+                    st.warning(f"{selected_sb} - {selected_color}{weight_info} is already in the cage.")
                 else:
                     cage_inventory.append({
                         'swatch_book': selected_sb,
                         'color': selected_color,
+                        'weight': cage_weight,
                         'date_added': datetime.now().strftime('%Y-%m-%d')
                     })
                     st.session_state.cage_inventory = cage_inventory
                     save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)
-                    st.toast(f"Added {selected_sb} - {selected_color} to cage!")
+                    weight_info = f" ({cage_weight})" if cage_weight else ""
+                    st.toast(f"Added {selected_sb} - {selected_color}{weight_info} to cage!")
                     st.rerun()
 
         st.divider()
@@ -1361,19 +1434,21 @@ elif tool == "Manufacturing Inventory":
 
             for sb_name in sorted(cage_by_sb.keys()):
                 items = cage_by_sb[sb_name]
-                with st.expander(f"**{sb_name}** ({len(items)} colors)", expanded=True):
-                    for item in sorted(items, key=lambda x: x['color']):
+                with st.expander(f"**{sb_name}** ({len(items)} items)", expanded=True):
+                    for ci, item in enumerate(sorted(items, key=lambda x: (x['color'], x.get('weight', '')))):
                         col1, col2 = st.columns([4, 1])
                         with col1:
-                            st.write(f"{item['color']}  *(added {item['date_added']})*")
+                            weight_label = f" - {item['weight']}" if item.get('weight') else ""
+                            st.write(f"{item['color']}{weight_label}  *(added {item['date_added']})*")
                         with col2:
-                            if st.button("Remove", key=f"cage_rm_{sb_name}_{item['color']}", type="secondary"):
-                                to_remove.append((item['swatch_book'], item['color']))
+                            weight_key = item.get('weight', '').replace(' ', '')
+                            if st.button("Remove", key=f"cage_rm_{sb_name}_{item['color']}_{weight_key}_{ci}", type="secondary"):
+                                to_remove.append((item['swatch_book'], item['color'], item.get('weight', '')))
 
             if to_remove:
                 cage_inventory = [
                     item for item in cage_inventory
-                    if (item['swatch_book'], item['color']) not in to_remove
+                    if (item['swatch_book'], item['color'], item.get('weight', '')) not in to_remove
                 ]
                 st.session_state.cage_inventory = cage_inventory
                 save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)

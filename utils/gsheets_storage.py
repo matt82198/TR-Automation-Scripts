@@ -597,7 +597,7 @@ def save_cage_inventory_cloud(inventory: List[Dict[str, str]]):
     try:
         df = pd.DataFrame(inventory)
         if df.empty:
-            df = pd.DataFrame(columns=['swatch_book', 'color', 'date_added'])
+            df = pd.DataFrame(columns=['swatch_book', 'color', 'weight', 'date_added'])
         conn.update(worksheet="cage_inventory", data=df)
     except Exception as e:
         st.warning(f"Could not save cage inventory: {e}")
@@ -613,6 +613,7 @@ def load_cage_inventory_local(file_path: Path) -> List[Dict[str, str]]:
                 inventory.append({
                     'swatch_book': row['swatch_book'],
                     'color': row['color'],
+                    'weight': row.get('weight', ''),
                     'date_added': row.get('date_added', '')
                 })
     return inventory
@@ -621,7 +622,7 @@ def load_cage_inventory_local(file_path: Path) -> List[Dict[str, str]]:
 def save_cage_inventory_local(file_path: Path, inventory: List[Dict[str, str]]):
     """Save cage inventory to local CSV file."""
     with open(file_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'date_added'])
+        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'weight', 'date_added'])
         writer.writeheader()
         for item in inventory:
             writer.writerow(item)
@@ -673,7 +674,7 @@ def save_panel_inventory_cloud(inventory: List[Dict[str, str]]):
     try:
         df = pd.DataFrame(inventory)
         if df.empty:
-            df = pd.DataFrame(columns=['swatch_book', 'color', 'status', 'last_updated'])
+            df = pd.DataFrame(columns=['swatch_book', 'color', 'weight', 'status', 'last_updated'])
         conn.update(worksheet="panel_inventory", data=df)
     except Exception as e:
         st.warning(f"Could not save panel inventory: {e}")
@@ -689,6 +690,7 @@ def load_panel_inventory_local(file_path: Path) -> List[Dict[str, str]]:
                 inventory.append({
                     'swatch_book': row['swatch_book'],
                     'color': row['color'],
+                    'weight': row.get('weight', ''),
                     'status': row.get('status', 'in_stock'),
                     'last_updated': row.get('last_updated', '')
                 })
@@ -698,7 +700,7 @@ def load_panel_inventory_local(file_path: Path) -> List[Dict[str, str]]:
 def save_panel_inventory_local(file_path: Path, inventory: List[Dict[str, str]]):
     """Save panel inventory to local CSV file."""
     with open(file_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'status', 'last_updated'])
+        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'weight', 'status', 'last_updated'])
         writer.writeheader()
         for item in inventory:
             writer.writerow(item)
