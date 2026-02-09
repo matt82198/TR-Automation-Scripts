@@ -137,6 +137,72 @@ class SwatchBookGenerator:
 
         return leather_products
 
+    def get_panel_colors(self) -> Dict[str, Dict]:
+        """Get all panel products with their color variants"""
+        products = self.get_leather_product_links()
+        panel_products = {}
+
+        print("\nFetching color variants for panel products...")
+
+        for name, url in products:
+            name_lower = name.lower()
+
+            if 'panel' not in name_lower:
+                continue
+            # Skip mystery/bundle panels
+            if 'mystery' in name_lower or 'bundle' in name_lower:
+                continue
+
+            product_name, colors, weights = self.extract_product_colors(url)
+
+            if colors:
+                panel_products[product_name or name] = {
+                    'colors': colors,
+                    'weights': weights,
+                    'url': url
+                }
+                print(f"  {product_name or name}: {len(colors)} colors")
+
+        return panel_products
+
+    def run_panels(self) -> Dict[str, Dict]:
+        """Get panel products grouped by tannery and leather type"""
+
+        print("=" * 60)
+        print("FETCHING PANEL PRODUCTS FROM WEBSITE")
+        print("=" * 60)
+        panel_products = self.get_panel_colors()
+
+        tanneries = defaultdict(list)
+        for product_name, info in panel_products.items():
+            tannery = self.get_tannery_from_product(product_name)
+            leather_type = self.get_leather_type_from_product(product_name)
+            tanneries[tannery].append({
+                'full_name': product_name,
+                'leather_type': leather_type,
+                'colors': info['colors'],
+                'weights': info['weights']
+            })
+
+        results = {}
+
+        for tannery in sorted(tanneries.keys()):
+            products = tanneries[tannery]
+
+            for product in sorted(products, key=lambda x: x['leather_type']):
+                leather_type = product['leather_type']
+                colors = product['colors']
+                panel_name = f"{tannery} {leather_type}"
+
+                results[panel_name] = {
+                    'tannery': tannery,
+                    'leather_type': leather_type,
+                    'colors': colors,
+                    'color_count': len(colors)
+                }
+
+        return results
+
     def get_tannery_from_product(self, product_name: str) -> str:
         """Extract the tannery name from a product name"""
         product_lower = product_name.lower()

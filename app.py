@@ -28,6 +28,7 @@ from gsheets_storage import (
     load_missing_inventory, save_missing_inventory,
     load_coefficients, save_coefficients,
     load_sample_inventory, save_sample_inventory,
+    load_panel_inventory, save_panel_inventory,
     is_cloud_deployment, log_activity
 )
 
@@ -68,8 +69,8 @@ TOOL_CATEGORIES = {
     "Order Management": {
         "icon": "📦",
         "tools": {
-            "Pending Order Count": {
-                "description": "Count pending panels and swatch books",
+            "Manufacturing Inventory": {
+                "description": "Pending orders, panel inventory, and sample tracking",
                 "permission": "standard"
             },
             "Mystery Bundle Counter": {
@@ -85,10 +86,6 @@ TOOL_CATEGORIES = {
     "Inventory & Shipping": {
         "icon": "🚚",
         "tools": {
-            "Sample Inventory": {
-                "description": "Track sample swatch availability by color",
-                "permission": "standard"
-            },
             "Leather Weight Calculator": {
                 "description": "Calculate box weights for shipping",
                 "permission": "standard"
@@ -771,176 +768,450 @@ elif tool == "QuickBooks Billing":
 # ORDER MANAGEMENT
 # =============================================================================
 
-elif tool == "Pending Order Count":
-    st.header("📦 Pending Order Count")
-    st.markdown("Count pending panels and swatch books from Squarespace orders.")
+elif tool == "Manufacturing Inventory":
+    st.header("📦 Manufacturing Inventory")
 
-    # Initialize session state for missing items
-    if 'missing_inventory' not in st.session_state:
-        st.session_state.missing_inventory = load_missing_inventory(MISSING_INVENTORY_FILE)
+    from collections import defaultdict
+    from swatch_book_contents import SwatchBookGenerator
 
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        if st.button("Refresh Orders", type="primary"):
-            st.session_state.pop('product_counts', None)
-    with col2:
-        view_mode = st.radio("View", ["Total Counts", "By Order"], horizontal=True)
+    SAMPLE_INVENTORY_FILE = Path(__file__).parent / "config" / "sample_inventory.csv"
+    PANEL_INVENTORY_FILE = Path(__file__).parent / "config" / "panel_inventory.csv"
 
-    # Fetch orders if not cached
-    if 'product_counts' not in st.session_state:
-        api_key = get_secret("SQUARESPACE_API_KEY")
-        if not api_key:
-            st.error("SQUARESPACE_API_KEY environment variable not set")
-        else:
-            with st.spinner("Fetching pending orders..."):
-                try:
-                    user_email = st.session_state.get("user_email", "local")
-                    log_activity(user_email, "Pending Order Count", "fetch", "refresh orders")
+    STATUS_OPTIONS = ['in_stock', 'low_stock', 'out_of_stock']
+    STATUS_LABELS = {'in_stock': 'In Stock', 'low_stock': 'Low Stock', 'out_of_stock': 'Out of Stock'}
+    STATUS_COLORS = {'in_stock': '🟢', 'low_stock': '🟡', 'out_of_stock': '🔴'}
 
-                    calculator = SquarespacePanelCalculator(api_key)
-                    st.session_state.product_counts = calculator.get_product_counts()
-                except Exception as e:
-                    st.error(f"Error fetching orders: {e}")
+    tab_pending, tab_panels, tab_samples = st.tabs(["Pending Orders", "Panel Inventory", "Sample Inventory"])
 
-    if 'product_counts' in st.session_state:
-        product_counts = st.session_state.product_counts
-        panels = product_counts["panels"]
-        swatch_books = product_counts["swatch_books"]
-        by_order = product_counts.get("by_order", {})
-        missing = st.session_state.missing_inventory
+    # =========================================================================
+    # TAB 1: Pending Orders (existing functionality)
+    # =========================================================================
+    with tab_pending:
+        st.markdown("Count pending panels and swatch books from Squarespace orders.")
 
-        # Track changes
-        updated_missing = set(missing)
+        # Initialize session state for missing items
+        if 'missing_inventory' not in st.session_state:
+            st.session_state.missing_inventory = load_missing_inventory(MISSING_INVENTORY_FILE)
 
-        if view_mode == "Total Counts":
-            st.markdown("**Check items that are missing/out of stock** to prioritize production.")
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("Refresh Orders", type="primary"):
+                st.session_state.pop('product_counts', None)
+        with col2:
+            view_mode = st.radio("View", ["Total Counts", "By Order"], horizontal=True)
 
-            # Panels section
-            st.subheader("Panels")
-            if panels["counts"]:
-                panel_total = sum(panels["counts"].values())
-                missing_panel_count = sum(
-                    panels["counts"][uid] for uid in panels["counts"] if uid in missing
-                )
-                st.metric("Total Panels Needed", panel_total,
-                          delta=f"{missing_panel_count} missing" if missing_panel_count else None,
-                          delta_color="inverse")
-
-                for unique_id, count in sorted(panels["counts"].items(),
-                                               key=lambda x: x[0] in missing,
-                                               reverse=True):
-                    details = panels["details"][unique_id]
-                    variant_info = f" ({details['variant_description']})" if details['variant_description'] else ""
-                    label = f"{details['product_name']}{variant_info} - **{count}** needed"
-
-                    is_missing = st.checkbox(
-                        label,
-                        value=unique_id in missing,
-                        key=f"panel_{unique_id}",
-                        help="Check if this item is out of stock"
-                    )
-
-                    if is_missing:
-                        updated_missing.add(unique_id)
-                    else:
-                        updated_missing.discard(unique_id)
+        # Fetch orders if not cached
+        if 'product_counts' not in st.session_state:
+            api_key = get_secret("SQUARESPACE_API_KEY")
+            if not api_key:
+                st.error("SQUARESPACE_API_KEY environment variable not set")
             else:
-                st.info("No panels in pending orders")
+                with st.spinner("Fetching pending orders..."):
+                    try:
+                        user_email = st.session_state.get("user_email", "local")
+                        log_activity(user_email, "Manufacturing Inventory", "fetch", "refresh pending orders")
+
+                        calculator = SquarespacePanelCalculator(api_key)
+                        st.session_state.product_counts = calculator.get_product_counts()
+                    except Exception as e:
+                        st.error(f"Error fetching orders: {e}")
+
+        if 'product_counts' in st.session_state:
+            product_counts = st.session_state.product_counts
+            panels = product_counts["panels"]
+            swatch_books = product_counts["swatch_books"]
+            by_order = product_counts.get("by_order", {})
+            missing = st.session_state.missing_inventory
+
+            # Track changes
+            updated_missing = set(missing)
+
+            if view_mode == "Total Counts":
+                st.markdown("**Check items that are missing/out of stock** to prioritize production.")
+
+                # Panels section
+                st.subheader("Panels")
+                if panels["counts"]:
+                    panel_total = sum(panels["counts"].values())
+                    missing_panel_count = sum(
+                        panels["counts"][uid] for uid in panels["counts"] if uid in missing
+                    )
+                    st.metric("Total Panels Needed", panel_total,
+                              delta=f"{missing_panel_count} missing" if missing_panel_count else None,
+                              delta_color="inverse")
+
+                    for unique_id, count in sorted(panels["counts"].items(),
+                                                   key=lambda x: x[0] in missing,
+                                                   reverse=True):
+                        details = panels["details"][unique_id]
+                        variant_info = f" ({details['variant_description']})" if details['variant_description'] else ""
+                        label = f"{details['product_name']}{variant_info} - **{count}** needed"
+
+                        is_missing = st.checkbox(
+                            label,
+                            value=unique_id in missing,
+                            key=f"panel_{unique_id}",
+                            help="Check if this item is out of stock"
+                        )
+
+                        if is_missing:
+                            updated_missing.add(unique_id)
+                        else:
+                            updated_missing.discard(unique_id)
+                else:
+                    st.info("No panels in pending orders")
+
+                st.divider()
+
+                # Swatch Books section
+                st.subheader("Swatch Books")
+                if swatch_books["counts"]:
+                    swatch_total = sum(swatch_books["counts"].values())
+                    missing_swatch_count = sum(
+                        swatch_books["counts"][uid] for uid in swatch_books["counts"] if uid in missing
+                    )
+                    st.metric("Total Swatch Books Needed", swatch_total,
+                              delta=f"{missing_swatch_count} missing" if missing_swatch_count else None,
+                              delta_color="inverse")
+
+                    for unique_id, count in sorted(swatch_books["counts"].items(),
+                                                   key=lambda x: x[0] in missing,
+                                                   reverse=True):
+                        details = swatch_books["details"][unique_id]
+                        variant_info = f" ({details['variant_description']})" if details['variant_description'] else ""
+                        label = f"{details['product_name']}{variant_info} - **{count}** needed"
+
+                        is_missing = st.checkbox(
+                            label,
+                            value=unique_id in missing,
+                            key=f"swatch_{unique_id}",
+                            help="Check if this item is out of stock"
+                        )
+
+                        if is_missing:
+                            updated_missing.add(unique_id)
+                        else:
+                            updated_missing.discard(unique_id)
+                else:
+                    st.info("No swatch books in pending orders")
+
+            else:  # By Order view
+                st.markdown("Items with missing stock are highlighted.")
+
+                if by_order:
+                    sorted_orders = sorted(by_order.items(),
+                                           key=lambda x: (x[1]["date"], x[0]))
+
+                    for order_num, order_data in sorted_orders:
+                        order_has_missing = any(
+                            item["unique_id"] in missing
+                            for item in order_data["panels"] + order_data["swatch_books"]
+                        )
+
+                        icon = "⚠️ " if order_has_missing else ""
+                        with st.expander(f"{icon}Order #{order_num} - {order_data['date']}", expanded=order_has_missing):
+                            if order_data["panels"]:
+                                st.markdown("**Panels:**")
+                                for item in order_data["panels"]:
+                                    variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
+                                    is_missing_item = item["unique_id"] in missing
+                                    marker = "🔴 " if is_missing_item else ""
+                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}")
+
+                            if order_data["swatch_books"]:
+                                st.markdown("**Swatch Books:**")
+                                for item in order_data["swatch_books"]:
+                                    variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
+                                    is_missing_item = item["unique_id"] in missing
+                                    marker = "🔴 " if is_missing_item else ""
+                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}")
+                else:
+                    st.info("No orders with panels or swatch books")
+
+            # Save if changed
+            if updated_missing != missing:
+                st.session_state.missing_inventory = updated_missing
+                save_missing_inventory(updated_missing, MISSING_INVENTORY_FILE)
+                st.toast("Missing inventory updated!")
+
+            # Download CSV button
+            st.divider()
+            csv_lines = ["Type,Product,Variant,Quantity,Missing"]
+            for unique_id, count in panels["counts"].items():
+                details = panels["details"][unique_id]
+                is_missing = "Yes" if unique_id in missing else "No"
+                csv_lines.append(f"Panel,{details['product_name']},{details['variant_description']},{count},{is_missing}")
+            for unique_id, count in swatch_books["counts"].items():
+                details = swatch_books["details"][unique_id]
+                is_missing = "Yes" if unique_id in missing else "No"
+                csv_lines.append(f"Swatch Book,{details['product_name']},{details['variant_description']},{count},{is_missing}")
+
+            st.download_button(
+                label="Download Pending Orders CSV",
+                data="\n".join(csv_lines),
+                file_name=f"pending_orders_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                mime="text/csv"
+            )
+
+    # =========================================================================
+    # TAB 2: Panel Inventory
+    # =========================================================================
+    with tab_panels:
+        st.markdown("Track panel availability by color for each leather type.")
+
+        if 'panel_inventory' not in st.session_state:
+            st.session_state.panel_inventory = load_panel_inventory(PANEL_INVENTORY_FILE)
+
+        pi_inventory = st.session_state.panel_inventory
+
+        with st.expander("Sync from Website", expanded=not pi_inventory):
+            st.caption("Scrape the Tannery Row website to find panel products and their colors.")
+            if st.button("Sync Panels", type="primary"):
+                user_email = st.session_state.get("user_email", "local")
+                log_activity(user_email, "Manufacturing Inventory", "sync", "panel inventory")
+
+                with st.spinner("Scraping website for panel products..."):
+                    generator = SwatchBookGenerator()
+                    results = generator.run_panels()
+
+                if not results:
+                    st.error("Could not fetch panel data from the website.")
+                else:
+                    existing = {(item['swatch_book'], item['color']): item for item in pi_inventory}
+                    scraped_keys = set()
+
+                    new_colors = []
+                    for panel_name, info in results.items():
+                        for color in info['colors']:
+                            key = (panel_name, color)
+                            scraped_keys.add(key)
+                            if key not in existing:
+                                new_colors.append({
+                                    'swatch_book': panel_name,
+                                    'color': color,
+                                    'status': 'in_stock',
+                                    'last_updated': datetime.now().strftime('%Y-%m-%d')
+                                })
+
+                    removed_keys = [k for k in existing if k not in scraped_keys]
+
+                    updated = [item for item in pi_inventory if (item['swatch_book'], item['color']) in scraped_keys]
+                    updated.extend(new_colors)
+
+                    st.session_state.panel_inventory = updated
+                    save_panel_inventory(updated, PANEL_INVENTORY_FILE)
+
+                    if new_colors:
+                        st.success(f"Added {len(new_colors)} new panel color(s)")
+                        for c in new_colors:
+                            st.write(f"  + {c['swatch_book']} - {c['color']}")
+                    if removed_keys:
+                        st.warning(f"Removed {len(removed_keys)} panel color(s) no longer on website")
+                        for sb, color in removed_keys:
+                            st.write(f"  - {sb} - {color}")
+                    if not new_colors and not removed_keys:
+                        st.info("Panel inventory is already up to date.")
+
+                    pi_inventory = st.session_state.panel_inventory
+                    st.rerun()
+
+        if not pi_inventory:
+            st.info("No panel inventory data yet. Use **Sync from Website** above to populate.")
+        else:
+            total = len(pi_inventory)
+            in_stock = sum(1 for i in pi_inventory if i['status'] == 'in_stock')
+            low_stock = sum(1 for i in pi_inventory if i['status'] == 'low_stock')
+            out_of_stock = sum(1 for i in pi_inventory if i['status'] == 'out_of_stock')
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Colors", total)
+            m2.metric("In Stock", in_stock)
+            m3.metric("Low Stock", low_stock)
+            m4.metric("Out of Stock", out_of_stock)
 
             st.divider()
 
-            # Swatch Books section
-            st.subheader("Swatch Books")
-            if swatch_books["counts"]:
-                swatch_total = sum(swatch_books["counts"].values())
-                missing_swatch_count = sum(
-                    swatch_books["counts"][uid] for uid in swatch_books["counts"] if uid in missing
-                )
-                st.metric("Total Swatch Books Needed", swatch_total,
-                          delta=f"{missing_swatch_count} missing" if missing_swatch_count else None,
-                          delta_color="inverse")
+            by_tannery = defaultdict(lambda: defaultdict(list))
+            for item in pi_inventory:
+                sb = item['swatch_book']
+                parts = sb.split(' ', 1)
+                tannery = parts[0] if parts else 'Other'
+                by_tannery[tannery][sb].append(item)
 
-                for unique_id, count in sorted(swatch_books["counts"].items(),
-                                               key=lambda x: x[0] in missing,
-                                               reverse=True):
-                    details = swatch_books["details"][unique_id]
-                    variant_info = f" ({details['variant_description']})" if details['variant_description'] else ""
-                    label = f"{details['product_name']}{variant_info} - **{count}** needed"
+            pi_changed = False
 
-                    is_missing = st.checkbox(
-                        label,
-                        value=unique_id in missing,
-                        key=f"swatch_{unique_id}",
-                        help="Check if this item is out of stock"
-                    )
+            for tannery in sorted(by_tannery.keys()):
+                swatch_books_group = by_tannery[tannery]
+                with st.expander(f"**{tannery}** ({sum(len(colors) for colors in swatch_books_group.values())} colors)", expanded=False):
+                    for sb_name in sorted(swatch_books_group.keys()):
+                        colors = swatch_books_group[sb_name]
+                        sb_out = sum(1 for c in colors if c['status'] == 'out_of_stock')
+                        sb_low = sum(1 for c in colors if c['status'] == 'low_stock')
+                        suffix = ""
+                        if sb_out:
+                            suffix += f" | 🔴 {sb_out}"
+                        if sb_low:
+                            suffix += f" | 🟡 {sb_low}"
 
-                    if is_missing:
-                        updated_missing.add(unique_id)
-                    else:
-                        updated_missing.discard(unique_id)
-            else:
-                st.info("No swatch books in pending orders")
+                        leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
+                        st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
 
-        else:  # By Order view
-            st.markdown("Items with missing stock are highlighted.")
+                        for color_item in sorted(colors, key=lambda x: x['color']):
+                            col1, col2 = st.columns([3, 2])
+                            with col1:
+                                current = color_item['status']
+                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}")
+                            with col2:
+                                key = f"pi_{sb_name}_{color_item['color']}"
+                                new_status = st.selectbox(
+                                    "Status",
+                                    STATUS_OPTIONS,
+                                    index=STATUS_OPTIONS.index(current),
+                                    format_func=lambda x: STATUS_LABELS[x],
+                                    key=key,
+                                    label_visibility="collapsed"
+                                )
+                                if new_status != current:
+                                    color_item['status'] = new_status
+                                    color_item['last_updated'] = datetime.now().strftime('%Y-%m-%d')
+                                    pi_changed = True
 
-            if by_order:
-                # Sort orders by date (oldest first) then by order number
-                sorted_orders = sorted(by_order.items(),
-                                       key=lambda x: (x[1]["date"], x[0]))
+                        st.markdown("---")
 
-                for order_num, order_data in sorted_orders:
-                    # Check if any items in this order are missing
-                    order_has_missing = any(
-                        item["unique_id"] in missing
-                        for item in order_data["panels"] + order_data["swatch_books"]
-                    )
+            if pi_changed:
+                st.session_state.panel_inventory = pi_inventory
+                save_panel_inventory(pi_inventory, PANEL_INVENTORY_FILE)
+                st.toast("Panel inventory updated!")
 
-                    # Create expander with warning icon if missing items
-                    icon = "⚠️ " if order_has_missing else ""
-                    with st.expander(f"{icon}Order #{order_num} - {order_data['date']}", expanded=order_has_missing):
-                        if order_data["panels"]:
-                            st.markdown("**Panels:**")
-                            for item in order_data["panels"]:
-                                variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
-                                is_missing_item = item["unique_id"] in missing
-                                marker = "🔴 " if is_missing_item else ""
-                                st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}")
+    # =========================================================================
+    # TAB 3: Sample Inventory
+    # =========================================================================
+    with tab_samples:
+        st.markdown("Track sample swatch availability by color for each swatch book.")
 
-                        if order_data["swatch_books"]:
-                            st.markdown("**Swatch Books:**")
-                            for item in order_data["swatch_books"]:
-                                variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
-                                is_missing_item = item["unique_id"] in missing
-                                marker = "🔴 " if is_missing_item else ""
-                                st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}")
-            else:
-                st.info("No orders with panels or swatch books")
+        if 'sample_inventory' not in st.session_state:
+            st.session_state.sample_inventory = load_sample_inventory(SAMPLE_INVENTORY_FILE)
 
-        # Save if changed
-        if updated_missing != missing:
-            st.session_state.missing_inventory = updated_missing
-            save_missing_inventory(updated_missing, MISSING_INVENTORY_FILE)
-            st.toast("Missing inventory updated!")
+        si_inventory = st.session_state.sample_inventory
 
-        # Download CSV button
-        st.divider()
-        csv_lines = ["Type,Product,Variant,Quantity,Missing"]
-        for unique_id, count in panels["counts"].items():
-            details = panels["details"][unique_id]
-            is_missing = "Yes" if unique_id in missing else "No"
-            csv_lines.append(f"Panel,{details['product_name']},{details['variant_description']},{count},{is_missing}")
-        for unique_id, count in swatch_books["counts"].items():
-            details = swatch_books["details"][unique_id]
-            is_missing = "Yes" if unique_id in missing else "No"
-            csv_lines.append(f"Swatch Book,{details['product_name']},{details['variant_description']},{count},{is_missing}")
+        with st.expander("Sync from Website", expanded=not si_inventory):
+            st.caption("Scrape the Tannery Row website to find new colors or detect removed ones.")
+            if st.button("Sync Samples", type="primary"):
+                user_email = st.session_state.get("user_email", "local")
+                log_activity(user_email, "Manufacturing Inventory", "sync", "sample inventory")
 
-        st.download_button(
-            label="Download Pending Orders CSV",
-            data="\n".join(csv_lines),
-            file_name=f"pending_orders_{datetime.now().strftime('%Y-%m-%d')}.csv",
-            mime="text/csv"
-        )
+                with st.spinner("Scraping website for current colors..."):
+                    generator = SwatchBookGenerator()
+                    results = generator.run()
+
+                if not results:
+                    st.error("Could not fetch swatch book data from the website.")
+                else:
+                    existing = {(item['swatch_book'], item['color']): item for item in si_inventory}
+                    scraped_keys = set()
+
+                    new_colors = []
+                    for swatch_name, info in results.items():
+                        for color in info['colors']:
+                            key = (swatch_name, color)
+                            scraped_keys.add(key)
+                            if key not in existing:
+                                new_colors.append({
+                                    'swatch_book': swatch_name,
+                                    'color': color,
+                                    'status': 'in_stock',
+                                    'last_updated': datetime.now().strftime('%Y-%m-%d')
+                                })
+
+                    removed_keys = [k for k in existing if k not in scraped_keys]
+
+                    updated = [item for item in si_inventory if (item['swatch_book'], item['color']) in scraped_keys]
+                    updated.extend(new_colors)
+
+                    st.session_state.sample_inventory = updated
+                    save_sample_inventory(updated, SAMPLE_INVENTORY_FILE)
+
+                    if new_colors:
+                        st.success(f"Added {len(new_colors)} new color(s)")
+                        for c in new_colors:
+                            st.write(f"  + {c['swatch_book']} - {c['color']}")
+                    if removed_keys:
+                        st.warning(f"Removed {len(removed_keys)} color(s) no longer on website")
+                        for sb, color in removed_keys:
+                            st.write(f"  - {sb} - {color}")
+                    if not new_colors and not removed_keys:
+                        st.info("Sample inventory is already up to date.")
+
+                    si_inventory = st.session_state.sample_inventory
+                    st.rerun()
+
+        if not si_inventory:
+            st.info("No sample inventory data yet. Use **Sync from Website** above to populate.")
+        else:
+            total = len(si_inventory)
+            in_stock = sum(1 for i in si_inventory if i['status'] == 'in_stock')
+            low_stock = sum(1 for i in si_inventory if i['status'] == 'low_stock')
+            out_of_stock = sum(1 for i in si_inventory if i['status'] == 'out_of_stock')
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Colors", total)
+            m2.metric("In Stock", in_stock)
+            m3.metric("Low Stock", low_stock)
+            m4.metric("Out of Stock", out_of_stock)
+
+            st.divider()
+
+            by_tannery = defaultdict(lambda: defaultdict(list))
+            for item in si_inventory:
+                sb = item['swatch_book']
+                parts = sb.split(' ', 1)
+                tannery = parts[0] if parts else 'Other'
+                by_tannery[tannery][sb].append(item)
+
+            si_changed = False
+
+            for tannery in sorted(by_tannery.keys()):
+                swatch_books_group = by_tannery[tannery]
+                with st.expander(f"**{tannery}** ({sum(len(colors) for colors in swatch_books_group.values())} colors)", expanded=False):
+                    for sb_name in sorted(swatch_books_group.keys()):
+                        colors = swatch_books_group[sb_name]
+                        sb_out = sum(1 for c in colors if c['status'] == 'out_of_stock')
+                        sb_low = sum(1 for c in colors if c['status'] == 'low_stock')
+                        suffix = ""
+                        if sb_out:
+                            suffix += f" | 🔴 {sb_out}"
+                        if sb_low:
+                            suffix += f" | 🟡 {sb_low}"
+
+                        leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
+                        st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
+
+                        for color_item in sorted(colors, key=lambda x: x['color']):
+                            col1, col2 = st.columns([3, 2])
+                            with col1:
+                                current = color_item['status']
+                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}")
+                            with col2:
+                                key = f"si_{sb_name}_{color_item['color']}"
+                                new_status = st.selectbox(
+                                    "Status",
+                                    STATUS_OPTIONS,
+                                    index=STATUS_OPTIONS.index(current),
+                                    format_func=lambda x: STATUS_LABELS[x],
+                                    key=key,
+                                    label_visibility="collapsed"
+                                )
+                                if new_status != current:
+                                    color_item['status'] = new_status
+                                    color_item['last_updated'] = datetime.now().strftime('%Y-%m-%d')
+                                    si_changed = True
+
+                        st.markdown("---")
+
+            if si_changed:
+                st.session_state.sample_inventory = si_inventory
+                save_sample_inventory(si_inventory, SAMPLE_INVENTORY_FILE)
+                st.toast("Sample inventory updated!")
 
 
 elif tool == "Mystery Bundle Counter":
@@ -1163,152 +1434,6 @@ elif tool == "Leather Weight Calculator":
                         st.caption(f"{data['sample_weight']} lbs / {data['sample_sqft']} sqft")
 
                 st.divider()
-
-
-elif tool == "Sample Inventory":
-    st.header("🚚 Sample Inventory")
-    st.markdown("Track the availability of sample swatches by color for each swatch book.")
-
-    SAMPLE_INVENTORY_FILE = Path(__file__).parent / "config" / "sample_inventory.csv"
-
-    # Load inventory into session state
-    if 'sample_inventory' not in st.session_state:
-        st.session_state.sample_inventory = load_sample_inventory(SAMPLE_INVENTORY_FILE)
-
-    inventory = st.session_state.sample_inventory
-
-    # --- Sync from Website ---
-    with st.expander("Sync from Website", expanded=not inventory):
-        st.caption("Scrape the Tannery Row website to find new colors or detect removed ones.")
-        if st.button("Sync Now", type="primary"):
-            user_email = st.session_state.get("user_email", "local")
-            log_activity(user_email, "Sample Inventory", "sync", "website")
-
-            from swatch_book_contents import SwatchBookGenerator
-            with st.spinner("Scraping website for current colors..."):
-                generator = SwatchBookGenerator()
-                results = generator.run()
-
-            if not results:
-                st.error("Could not fetch swatch book data from the website.")
-            else:
-                # Build lookup of existing inventory
-                existing = {(item['swatch_book'], item['color']): item for item in inventory}
-                scraped_keys = set()
-
-                new_colors = []
-                for swatch_name, info in results.items():
-                    for color in info['colors']:
-                        key = (swatch_name, color)
-                        scraped_keys.add(key)
-                        if key not in existing:
-                            new_colors.append({
-                                'swatch_book': swatch_name,
-                                'color': color,
-                                'status': 'in_stock',
-                                'last_updated': datetime.now().strftime('%Y-%m-%d')
-                            })
-
-                # Colors in inventory but no longer on website
-                removed_keys = [k for k in existing if k not in scraped_keys]
-
-                # Apply changes
-                updated = [item for item in inventory if (item['swatch_book'], item['color']) in scraped_keys]
-                updated.extend(new_colors)
-
-                st.session_state.sample_inventory = updated
-                save_sample_inventory(updated, SAMPLE_INVENTORY_FILE)
-
-                if new_colors:
-                    st.success(f"Added {len(new_colors)} new color(s)")
-                    for c in new_colors:
-                        st.write(f"  + {c['swatch_book']} - {c['color']}")
-                if removed_keys:
-                    st.warning(f"Removed {len(removed_keys)} color(s) no longer on website")
-                    for sb, color in removed_keys:
-                        st.write(f"  - {sb} - {color}")
-                if not new_colors and not removed_keys:
-                    st.info("Inventory is already up to date.")
-
-                inventory = st.session_state.sample_inventory
-                st.rerun()
-
-    if not inventory:
-        st.info("No sample inventory data yet. Use **Sync from Website** above to populate.")
-    else:
-        # Summary metrics
-        total = len(inventory)
-        in_stock = sum(1 for i in inventory if i['status'] == 'in_stock')
-        low_stock = sum(1 for i in inventory if i['status'] == 'low_stock')
-        out_of_stock = sum(1 for i in inventory if i['status'] == 'out_of_stock')
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Colors", total)
-        m2.metric("In Stock", in_stock)
-        m3.metric("Low Stock", low_stock)
-        m4.metric("Out of Stock", out_of_stock)
-
-        st.divider()
-
-        # Group by tannery and swatch book
-        from collections import defaultdict
-        by_tannery = defaultdict(lambda: defaultdict(list))
-        for item in inventory:
-            sb = item['swatch_book']
-            # Extract tannery from swatch book name (first word)
-            parts = sb.split(' ', 1)
-            tannery = parts[0] if parts else 'Other'
-            by_tannery[tannery][sb].append(item)
-
-        STATUS_OPTIONS = ['in_stock', 'low_stock', 'out_of_stock']
-        STATUS_LABELS = {'in_stock': 'In Stock', 'low_stock': 'Low Stock', 'out_of_stock': 'Out of Stock'}
-        STATUS_COLORS = {'in_stock': '🟢', 'low_stock': '🟡', 'out_of_stock': '🔴'}
-
-        changed = False
-
-        for tannery in sorted(by_tannery.keys()):
-            swatch_books = by_tannery[tannery]
-            with st.expander(f"**{tannery}** ({sum(len(colors) for colors in swatch_books.values())} colors)", expanded=False):
-                for sb_name in sorted(swatch_books.keys()):
-                    colors = swatch_books[sb_name]
-                    # Swatch book sub-header with status summary
-                    sb_out = sum(1 for c in colors if c['status'] == 'out_of_stock')
-                    sb_low = sum(1 for c in colors if c['status'] == 'low_stock')
-                    suffix = ""
-                    if sb_out:
-                        suffix += f" | 🔴 {sb_out}"
-                    if sb_low:
-                        suffix += f" | 🟡 {sb_low}"
-
-                    leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
-                    st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
-
-                    for color_item in sorted(colors, key=lambda x: x['color']):
-                        col1, col2 = st.columns([3, 2])
-                        with col1:
-                            current = color_item['status']
-                            st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}")
-                        with col2:
-                            key = f"si_{sb_name}_{color_item['color']}"
-                            new_status = st.selectbox(
-                                "Status",
-                                STATUS_OPTIONS,
-                                index=STATUS_OPTIONS.index(current),
-                                format_func=lambda x: STATUS_LABELS[x],
-                                key=key,
-                                label_visibility="collapsed"
-                            )
-                            if new_status != current:
-                                color_item['status'] = new_status
-                                color_item['last_updated'] = datetime.now().strftime('%Y-%m-%d')
-                                changed = True
-
-                    st.markdown("---")
-
-        if changed:
-            st.session_state.sample_inventory = inventory
-            save_sample_inventory(inventory, SAMPLE_INVENTORY_FILE)
-            st.toast("Sample inventory updated!")
 
 
 elif tool == "Swatch Book Generator":

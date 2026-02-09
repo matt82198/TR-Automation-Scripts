@@ -521,6 +521,83 @@ def save_sample_inventory(inventory: List[Dict[str, str]], file_path: Optional[P
 
 
 # =============================================================================
+# Panel Inventory Storage
+# =============================================================================
+
+def load_panel_inventory_cloud() -> List[Dict[str, str]]:
+    """Load panel inventory from Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return []
+
+    try:
+        df = conn.read(worksheet="panel_inventory", ttl=0)
+        if df is not None and not df.empty:
+            return df.to_dict('records')
+    except Exception as e:
+        st.warning(f"Could not load panel inventory from Google Sheets: {e}")
+
+    return []
+
+
+def save_panel_inventory_cloud(inventory: List[Dict[str, str]]):
+    """Save panel inventory to Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return
+
+    try:
+        df = pd.DataFrame(inventory)
+        if df.empty:
+            df = pd.DataFrame(columns=['swatch_book', 'color', 'status', 'last_updated'])
+        conn.update(worksheet="panel_inventory", data=df)
+    except Exception as e:
+        st.warning(f"Could not save panel inventory: {e}")
+
+
+def load_panel_inventory_local(file_path: Path) -> List[Dict[str, str]]:
+    """Load panel inventory from local CSV file."""
+    inventory = []
+    if file_path.exists():
+        with open(file_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                inventory.append({
+                    'swatch_book': row['swatch_book'],
+                    'color': row['color'],
+                    'status': row.get('status', 'in_stock'),
+                    'last_updated': row.get('last_updated', '')
+                })
+    return inventory
+
+
+def save_panel_inventory_local(file_path: Path, inventory: List[Dict[str, str]]):
+    """Save panel inventory to local CSV file."""
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'status', 'last_updated'])
+        writer.writeheader()
+        for item in inventory:
+            writer.writerow(item)
+
+
+def load_panel_inventory(file_path: Optional[Path] = None) -> List[Dict[str, str]]:
+    """Load panel inventory from storage. Uses Google Sheets on cloud, local CSV otherwise."""
+    if is_cloud_deployment():
+        return load_panel_inventory_cloud()
+    elif file_path:
+        return load_panel_inventory_local(file_path)
+    return []
+
+
+def save_panel_inventory(inventory: List[Dict[str, str]], file_path: Optional[Path] = None):
+    """Save panel inventory to storage. Uses Google Sheets on cloud, local CSV otherwise."""
+    if is_cloud_deployment():
+        save_panel_inventory_cloud(inventory)
+    elif file_path:
+        save_panel_inventory_local(file_path, inventory)
+
+
+# =============================================================================
 # Activity Log Storage
 # =============================================================================
 
