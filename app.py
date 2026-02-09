@@ -30,6 +30,7 @@ from gsheets_storage import (
     load_sample_inventory, save_sample_inventory,
     load_panel_inventory, save_panel_inventory,
     load_mystery_panel_count, save_mystery_panel_count,
+    load_cage_inventory, save_cage_inventory,
     is_cloud_deployment, log_activity
 )
 
@@ -777,12 +778,32 @@ elif tool == "Manufacturing Inventory":
 
     SAMPLE_INVENTORY_FILE = Path(__file__).parent / "config" / "sample_inventory.csv"
     PANEL_INVENTORY_FILE = Path(__file__).parent / "config" / "panel_inventory.csv"
+    CAGE_INVENTORY_FILE = Path(__file__).parent / "config" / "cage_inventory.csv"
 
     STATUS_OPTIONS = ['in_stock', 'low_stock', 'out_of_stock']
     STATUS_LABELS = {'in_stock': 'In Stock', 'low_stock': 'Low Stock', 'out_of_stock': 'Out of Stock'}
     STATUS_COLORS = {'in_stock': '🟢', 'low_stock': '🟡', 'out_of_stock': '🔴'}
 
-    tab_pending, tab_panels, tab_samples = st.tabs(["Pending Orders", "Panel Inventory", "Sample Inventory"])
+    # Load cage inventory for cross-referencing across all tabs
+    if 'cage_inventory' not in st.session_state:
+        st.session_state.cage_inventory = load_cage_inventory(CAGE_INVENTORY_FILE)
+    cage_set = {(item['swatch_book'], item['color']) for item in st.session_state.cage_inventory}
+
+    def is_in_cage(product_name, color):
+        """Check if leather is available in the cage. Normalizes panel product names."""
+        # Direct match (sample inventory names like "Horween Dublin")
+        if (product_name, color) in cage_set:
+            return True
+        # Strip " Leather Panels" for panel product names
+        normalized = product_name.replace(" Leather Panels", "").replace(" Leather Panel", "")
+        # Also strip brand bullet separators (e.g. "Horween • Dublin" -> check both forms)
+        for sep in [' • ', ' \u2022 ', ' - ']:
+            normalized = normalized.replace(sep, ' ')
+        if (normalized, color) in cage_set:
+            return True
+        return False
+
+    tab_pending, tab_panels, tab_samples, tab_cage = st.tabs(["Pending Orders", "Panel Inventory", "Sample Inventory", "Cage Inventory"])
 
     # =========================================================================
     # TAB 1: Pending Orders (existing functionality)
@@ -917,7 +938,14 @@ elif tool == "Manufacturing Inventory":
                                     variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
                                     is_missing_item = item["unique_id"] in missing
                                     marker = "🔴 " if is_missing_item else ""
-                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}")
+                                    # Check cage by extracting color from variant description
+                                    item_color = ""
+                                    for part in item.get('variant_description', '').split(' - '):
+                                        if part.strip().startswith('Color:'):
+                                            item_color = part.replace('Color:', '').strip()
+                                            break
+                                    cage_icon = " 📦" if item_color and is_in_cage(item['product_name'], item_color) else ""
+                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}{cage_icon}")
 
                             if order_data["swatch_books"]:
                                 st.markdown("**Swatch Books:**")
@@ -925,7 +953,13 @@ elif tool == "Manufacturing Inventory":
                                     variant_info = f" ({item['variant_description']})" if item['variant_description'] else ""
                                     is_missing_item = item["unique_id"] in missing
                                     marker = "🔴 " if is_missing_item else ""
-                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}")
+                                    item_color = ""
+                                    for part in item.get('variant_description', '').split(' - '):
+                                        if part.strip().startswith('Color:'):
+                                            item_color = part.replace('Color:', '').strip()
+                                            break
+                                    cage_icon = " 📦" if item_color and is_in_cage(item['product_name'], item_color) else ""
+                                    st.markdown(f"- {marker}{item['product_name']}{variant_info} x{item['quantity']}{cage_icon}")
                 else:
                     st.info("No orders with panels or swatch books")
 
@@ -1083,7 +1117,8 @@ elif tool == "Manufacturing Inventory":
                             col1, col2 = st.columns([3, 2])
                             with col1:
                                 current = color_item['status']
-                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}")
+                                cage_icon = " 📦" if is_in_cage(sb_name, color_item['color']) else ""
+                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}{cage_icon}")
                             with col2:
                                 key = f"pi_{sb_name}_{color_item['color']}"
                                 new_status = st.selectbox(
@@ -1213,7 +1248,8 @@ elif tool == "Manufacturing Inventory":
                             col1, col2 = st.columns([3, 2])
                             with col1:
                                 current = color_item['status']
-                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}")
+                                cage_icon = " 📦" if is_in_cage(sb_name, color_item['color']) else ""
+                                st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}{cage_icon}")
                             with col2:
                                 key = f"si_{sb_name}_{color_item['color']}"
                                 new_status = st.selectbox(
@@ -1235,6 +1271,89 @@ elif tool == "Manufacturing Inventory":
                 st.session_state.sample_inventory = si_inventory
                 save_sample_inventory(si_inventory, SAMPLE_INVENTORY_FILE)
                 st.toast("Sample inventory updated!")
+
+    # =========================================================================
+    # TAB 4: Cage Inventory
+    # =========================================================================
+    with tab_cage:
+        st.markdown("Track what leather is in the cage and ready to be cut for panels or samples.")
+
+        cage_inventory = st.session_state.cage_inventory
+
+        # --- Add to cage form ---
+        st.subheader("Add Leather to Cage")
+
+        # Load sample inventory for dropdown options
+        if 'sample_inventory' not in st.session_state:
+            st.session_state.sample_inventory = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+
+        si_data = st.session_state.sample_inventory
+        if not si_data:
+            st.warning("Sync Sample Inventory first to populate swatch book options.")
+        else:
+            # Build dropdown options from sample inventory
+            sb_names = sorted(set(item['swatch_book'] for item in si_data))
+
+            selected_sb = st.selectbox("Swatch Book", sb_names, key="cage_sb_select")
+
+            # Colors for the selected swatch book
+            sb_colors = sorted(set(
+                item['color'] for item in si_data if item['swatch_book'] == selected_sb
+            ))
+            selected_color = st.selectbox("Color", sb_colors, key="cage_color_select")
+
+            if st.button("Add to Cage", type="primary"):
+                # Check if already in cage
+                if (selected_sb, selected_color) in cage_set:
+                    st.warning(f"{selected_sb} - {selected_color} is already in the cage.")
+                else:
+                    cage_inventory.append({
+                        'swatch_book': selected_sb,
+                        'color': selected_color,
+                        'date_added': datetime.now().strftime('%Y-%m-%d')
+                    })
+                    st.session_state.cage_inventory = cage_inventory
+                    save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)
+                    st.toast(f"Added {selected_sb} - {selected_color} to cage!")
+                    st.rerun()
+
+        st.divider()
+
+        # --- Current cage contents ---
+        st.subheader("Current Cage Contents")
+
+        if not cage_inventory:
+            st.info("Cage is empty.")
+        else:
+            st.metric("Items in Cage", len(cage_inventory))
+
+            # Group by swatch book
+            cage_by_sb = defaultdict(list)
+            for item in cage_inventory:
+                cage_by_sb[item['swatch_book']].append(item)
+
+            to_remove = []
+
+            for sb_name in sorted(cage_by_sb.keys()):
+                items = cage_by_sb[sb_name]
+                with st.expander(f"**{sb_name}** ({len(items)} colors)", expanded=True):
+                    for item in sorted(items, key=lambda x: x['color']):
+                        col1, col2 = st.columns([4, 1])
+                        with col1:
+                            st.write(f"{item['color']}  *(added {item['date_added']})*")
+                        with col2:
+                            if st.button("Remove", key=f"cage_rm_{sb_name}_{item['color']}", type="secondary"):
+                                to_remove.append((item['swatch_book'], item['color']))
+
+            if to_remove:
+                cage_inventory = [
+                    item for item in cage_inventory
+                    if (item['swatch_book'], item['color']) not in to_remove
+                ]
+                st.session_state.cage_inventory = cage_inventory
+                save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)
+                st.toast(f"Removed {len(to_remove)} item(s) from cage")
+                st.rerun()
 
 
 elif tool == "Mystery Bundle Counter":

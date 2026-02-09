@@ -569,6 +569,82 @@ def save_mystery_panel_count(count: int, file_path: Optional[Path] = None):
 
 
 # =============================================================================
+# Cage Inventory Storage
+# =============================================================================
+
+def load_cage_inventory_cloud() -> List[Dict[str, str]]:
+    """Load cage inventory from Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return []
+
+    try:
+        df = conn.read(worksheet="cage_inventory", ttl=0)
+        if df is not None and not df.empty:
+            return df.to_dict('records')
+    except Exception as e:
+        st.warning(f"Could not load cage inventory from Google Sheets: {e}")
+
+    return []
+
+
+def save_cage_inventory_cloud(inventory: List[Dict[str, str]]):
+    """Save cage inventory to Google Sheets."""
+    conn = get_gsheets_connection()
+    if not conn:
+        return
+
+    try:
+        df = pd.DataFrame(inventory)
+        if df.empty:
+            df = pd.DataFrame(columns=['swatch_book', 'color', 'date_added'])
+        conn.update(worksheet="cage_inventory", data=df)
+    except Exception as e:
+        st.warning(f"Could not save cage inventory: {e}")
+
+
+def load_cage_inventory_local(file_path: Path) -> List[Dict[str, str]]:
+    """Load cage inventory from local CSV file."""
+    inventory = []
+    if file_path.exists():
+        with open(file_path, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                inventory.append({
+                    'swatch_book': row['swatch_book'],
+                    'color': row['color'],
+                    'date_added': row.get('date_added', '')
+                })
+    return inventory
+
+
+def save_cage_inventory_local(file_path: Path, inventory: List[Dict[str, str]]):
+    """Save cage inventory to local CSV file."""
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=['swatch_book', 'color', 'date_added'])
+        writer.writeheader()
+        for item in inventory:
+            writer.writerow(item)
+
+
+def load_cage_inventory(file_path: Optional[Path] = None) -> List[Dict[str, str]]:
+    """Load cage inventory from storage. Uses Google Sheets on cloud, local CSV otherwise."""
+    if is_cloud_deployment():
+        return load_cage_inventory_cloud()
+    elif file_path:
+        return load_cage_inventory_local(file_path)
+    return []
+
+
+def save_cage_inventory(inventory: List[Dict[str, str]], file_path: Optional[Path] = None):
+    """Save cage inventory to storage. Uses Google Sheets on cloud, local CSV otherwise."""
+    if is_cloud_deployment():
+        save_cage_inventory_cloud(inventory)
+    elif file_path:
+        save_cage_inventory_local(file_path, inventory)
+
+
+# =============================================================================
 # Panel Inventory Storage
 # =============================================================================
 
