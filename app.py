@@ -1122,14 +1122,14 @@ elif tool == "Manufacturing Inventory":
                         leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
                         st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
 
-                        for color_item in sorted(colors, key=lambda x: x['color']):
+                        for ci, color_item in enumerate(sorted(colors, key=lambda x: x['color'])):
                             col1, col2 = st.columns([3, 2])
                             with col1:
                                 current = color_item['status']
                                 cage_icon = " 📦" if is_in_cage(sb_name, color_item['color']) else ""
                                 st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}{cage_icon}")
                             with col2:
-                                key = f"pi_{sb_name}_{color_item['color']}"
+                                key = f"pi_{sb_name}_{color_item['color']}_{ci}"
                                 new_status = st.selectbox(
                                     "Status",
                                     STATUS_OPTIONS,
@@ -1261,14 +1261,14 @@ elif tool == "Manufacturing Inventory":
                         leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
                         st.markdown(f"**{leather_type}** ({len(colors)} colors{suffix})")
 
-                        for color_item in sorted(colors, key=lambda x: x['color']):
+                        for ci, color_item in enumerate(sorted(colors, key=lambda x: x['color'])):
                             col1, col2 = st.columns([3, 2])
                             with col1:
                                 current = color_item['status']
                                 cage_icon = " 📦" if is_in_cage(sb_name, color_item['color']) else ""
                                 st.write(f"{STATUS_COLORS.get(current, '')} {color_item['color']}{cage_icon}")
                             with col2:
-                                key = f"si_{sb_name}_{color_item['color']}"
+                                key = f"si_{sb_name}_{color_item['color']}_{ci}"
                                 new_status = st.selectbox(
                                     "Status",
                                     STATUS_OPTIONS,
