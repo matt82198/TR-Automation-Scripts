@@ -251,7 +251,7 @@ for category, cat_data in available_tools.items():
     for tool_name in tool_names:
         tool_data = cat_data["tools"][tool_name]
         seasonal = tool_data.get("seasonal")
-        is_off_season = seasonal and datetime.now().month not in seasonal
+        is_off_season = bool(seasonal and datetime.now().month not in seasonal)
         if st.sidebar.button(
             tool_name,
             key=f"btn_{tool_name}",
