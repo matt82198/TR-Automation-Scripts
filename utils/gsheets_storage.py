@@ -45,6 +45,15 @@ def get_gsheets_connection():
         return None
 
 
+def _gsheets_save(conn, worksheet: str, df: pd.DataFrame):
+    """Save DataFrame to Google Sheets, creating the worksheet if it doesn't exist."""
+    try:
+        conn.update(worksheet=worksheet, data=df)
+    except Exception:
+        # Worksheet likely doesn't exist yet, try creating it
+        conn.create(worksheet=worksheet, data=df)
+
+
 # =============================================================================
 # Import Log Storage
 # =============================================================================
@@ -473,7 +482,7 @@ def save_sample_inventory_cloud(inventory: List[Dict[str, str]]):
         df = pd.DataFrame(inventory)
         if df.empty:
             df = pd.DataFrame(columns=['swatch_book', 'color', 'status', 'last_updated'])
-        conn.update(worksheet="sample_inventory", data=df)
+        _gsheets_save(conn, "sample_inventory", df)
     except Exception as e:
         st.warning(f"Could not save sample inventory: {e}")
 
@@ -543,7 +552,7 @@ def save_mystery_panel_count_cloud(count: int):
         return
     try:
         df = pd.DataFrame([{'count': count}])
-        conn.update(worksheet="mystery_panel_count", data=df)
+        _gsheets_save(conn, "mystery_panel_count", df)
     except Exception:
         pass
 
@@ -582,8 +591,8 @@ def load_cage_inventory_cloud() -> List[Dict[str, str]]:
         df = conn.read(worksheet="cage_inventory", ttl=0)
         if df is not None and not df.empty:
             return df.to_dict('records')
-    except Exception as e:
-        st.warning(f"Could not load cage inventory from Google Sheets: {e}")
+    except Exception:
+        pass  # Worksheet doesn't exist yet, will be created on first save
 
     return []
 
@@ -598,7 +607,7 @@ def save_cage_inventory_cloud(inventory: List[Dict[str, str]]):
         df = pd.DataFrame(inventory)
         if df.empty:
             df = pd.DataFrame(columns=['swatch_book', 'color', 'weight', 'date_added'])
-        conn.update(worksheet="cage_inventory", data=df)
+        _gsheets_save(conn, "cage_inventory", df)
     except Exception as e:
         st.warning(f"Could not save cage inventory: {e}")
 
@@ -659,8 +668,8 @@ def load_panel_inventory_cloud() -> List[Dict[str, str]]:
         df = conn.read(worksheet="panel_inventory", ttl=0)
         if df is not None and not df.empty:
             return df.to_dict('records')
-    except Exception as e:
-        st.warning(f"Could not load panel inventory from Google Sheets: {e}")
+    except Exception:
+        pass  # Worksheet doesn't exist yet, will be created on first save
 
     return []
 
@@ -675,7 +684,7 @@ def save_panel_inventory_cloud(inventory: List[Dict[str, str]]):
         df = pd.DataFrame(inventory)
         if df.empty:
             df = pd.DataFrame(columns=['swatch_book', 'color', 'weight', 'status', 'last_updated'])
-        conn.update(worksheet="panel_inventory", data=df)
+        _gsheets_save(conn, "panel_inventory", df)
     except Exception as e:
         st.warning(f"Could not save panel inventory: {e}")
 
