@@ -131,7 +131,9 @@ class SquarespacePanelCalculator:
 
     def fetch_all_panel_variants(self) -> list:
         """Fetch all panel product variants from the Squarespace Products API.
-        Returns list of dicts with product_name, color, weight."""
+        Returns deduplicated list of dicts with product_name, color, weight.
+        Deduplicates across sizes (1' vs 2' panels share same color/weight)."""
+        seen = set()
         variants = []
         cursor = None
 
@@ -145,7 +147,7 @@ class SquarespacePanelCalculator:
             response.raise_for_status()
             data = response.json()
 
-            for product in data.get("result", []):
+            for product in data.get("products", []):
                 name = product.get("name", "")
                 if "panel" not in name.lower():
                     continue
@@ -154,14 +156,25 @@ class SquarespacePanelCalculator:
                     attrs = variant.get("attributes", {})
                     color = attrs.get("Color", "")
                     weight = attrs.get("Weight", "")
-                    if color:
+                    if not color:
+                        continue
+                    # Normalize weight: "3-4 oz (1.2-1.6 mm)" -> "3-4 oz"
+                    if '(' in weight:
+                        weight = weight[:weight.index('(')].strip()
+
+                    key = (name, color, weight)
+                    if key not in seen:
+                        seen.add(key)
                         variants.append({
                             'product_name': name,
                             'color': color,
                             'weight': weight
                         })
 
-            cursor = data.get("pagination", {}).get("nextPageCursor")
+            pagination = data.get("pagination", {})
+            if not pagination.get("hasNextPage"):
+                break
+            cursor = pagination.get("nextPageCursor")
             if not cursor:
                 break
 
