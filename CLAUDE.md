@@ -13,13 +13,13 @@ Streamlit dashboard and CLI toolset for Tannery Row, a leather goods company. Th
 | Script | Mode | Description |
 |--------|------|-------------|
 | `squarespace_to_quickbooks.py` | CLI + Streamlit | Convert Squarespace orders to QuickBooks IIF files |
-| `payment_fetch.py` | CLI + Streamlit | Pull Stripe/PayPal transactions for EOM billing (read-only) |
+| `payment_fetch.py` | CLI only | Pull Stripe/PayPal transactions for EOM billing (read-only) |
 | `mystery_bundle_counter.py` | CLI + Streamlit | Count mystery bundle quantities by leather type |
 | `leather_weight_calculator.py` | CLI + Streamlit | Calculate/estimate box weights for shipping |
 | `toml_to_json.py` | CLI only | Convert TOML files to JSON (no argparse, uses sys.argv) |
 | `pending_order_count.py` | Streamlit only | Count pending panels and swatch books |
 | `order_payment_matcher.py` | Streamlit only | Match specific orders to payment transactions |
-| `quickbooks_billing_helper.py` | Streamlit only | Combine order + payment data for manual QB entry |
+| `quickbooks_billing_helper.py` | **Hidden** | Combine order + payment data for manual QB entry (see Future Plans) |
 | `swatch_book_contents.py` | Streamlit only | Generate swatch book reference PDF |
 | `materialbank_method.py` | Streamlit only | Import Material Bank leads into Method CRM |
 | `email_helper.py` | Internal module | Email delivery (used by `squarespace_to_quickbooks.py`) |
@@ -792,3 +792,24 @@ streamlit run app.py
 ```
 
 Requires `.streamlit/secrets.toml` with API keys or equivalent environment variables.
+
+---
+
+## Future Plans
+
+### QuickBooks Billing Tool (Streamlit)
+
+The current `quickbooks_billing_helper.py` Streamlit tool has been hidden from the dashboard. It needs to be rebuilt to export an Excel file with line items formatted for direct copy-paste into QuickBooks Desktop Enterprise invoice entry.
+
+**Requirements:**
+- Input: Squarespace order numbers (same as current)
+- Output: Downloadable `.xlsx` file with columns matching QB Desktop Enterprise invoice line item entry (Item, Description, Qty, Rate, Amount, Tax Code)
+- Each order should be a separate sheet or clearly separated section
+- Line items should use the QB item names from `config/sku_mapping.csv` mapping (not raw Squarespace product names)
+- Include customer name, invoice date, ship-to address, and payment info (Stripe/PayPal match)
+- Format should allow selecting all line item rows in Excel and pasting directly into a QB Desktop Enterprise invoice
+
+**Existing code to leverage:**
+- `scripts/quickbooks_billing_helper.py` — has `get_billing_data()`, `generate_line_items_table()` (needs rework)
+- `scripts/squarespace_to_quickbooks.py` — has SKU mapping and customer matching logic
+- `scripts/payment_fetch.py` — Stripe/PayPal transaction fetching
