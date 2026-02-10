@@ -129,6 +129,44 @@ class SquarespacePanelCalculator:
         orders = self.fetch_orders(fulfillment_status)
         return self.count_products(orders)
 
+    def fetch_all_panel_variants(self) -> list:
+        """Fetch all panel product variants from the Squarespace Products API.
+        Returns list of dicts with product_name, color, weight."""
+        variants = []
+        cursor = None
+
+        while True:
+            params = {"cursor": cursor} if cursor else {}
+            response = requests.get(
+                f"{self.base_url}/products",
+                headers=self.headers,
+                params=params
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            for product in data.get("result", []):
+                name = product.get("name", "")
+                if "panel" not in name.lower():
+                    continue
+
+                for variant in product.get("variants", []):
+                    attrs = variant.get("attributes", {})
+                    color = attrs.get("Color", "")
+                    weight = attrs.get("Weight", "")
+                    if color:
+                        variants.append({
+                            'product_name': name,
+                            'color': color,
+                            'weight': weight
+                        })
+
+            cursor = data.get("pagination", {}).get("nextPageCursor")
+            if not cursor:
+                break
+
+        return variants
+
 
 def main():
     """Main function"""

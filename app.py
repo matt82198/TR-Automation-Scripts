@@ -1080,8 +1080,8 @@ elif tool == "Manufacturing Inventory":
 
         pi_inventory = st.session_state.panel_inventory
 
-        with st.expander("Sync from Orders", expanded=not pi_inventory):
-            st.caption("Pull panel products from pending Squarespace orders to discover new panel variants.")
+        with st.expander("Sync from Store", expanded=not pi_inventory):
+            st.caption("Pull all panel products and variants from the Squarespace store catalog.")
             if st.button("Sync Panels", type="primary"):
                 user_email = st.session_state.get("user_email", "local")
                 log_activity(user_email, "Manufacturing Inventory", "sync", "panel inventory")
@@ -1090,38 +1090,24 @@ elif tool == "Manufacturing Inventory":
                 if not api_key:
                     st.error("SQUARESPACE_API_KEY not set")
                 else:
-                    with st.spinner("Fetching panel products from orders..."):
+                    with st.spinner("Fetching all panel products from store..."):
                         calculator = SquarespacePanelCalculator(api_key)
-                        product_counts = calculator.get_product_counts()
+                        all_variants = calculator.fetch_all_panel_variants()
 
-                    panel_details = product_counts["panels"]["details"]
-                    if not panel_details:
-                        st.info("No panel products found in pending orders.")
+                    if not all_variants:
+                        st.info("No panel products found in the store.")
                     else:
                         existing = {(item['swatch_book'], item['color'], item.get('weight', '')): item for item in pi_inventory}
 
                         new_variants = []
-                        for unique_id, details in panel_details.items():
-                            product_name = details['product_name']
-                            variant_desc = details['variant_description']
-                            # Extract color and weight from variant description
-                            # e.g. "Color: Black - Weight: 3-4 oz"
-                            color = variant_desc
-                            weight = ''
-                            for part in variant_desc.split(' - '):
-                                part = part.strip()
-                                if part.startswith('Color:'):
-                                    color = part.replace('Color:', '').strip()
-                                elif part.startswith('Weight:'):
-                                    weight = part.replace('Weight:', '').strip()
-
-                            key = (product_name, color, weight)
+                        for v in all_variants:
+                            key = (v['product_name'], v['color'], v['weight'])
                             if key not in existing:
-                                existing[key] = True  # prevent dupes within same batch
+                                existing[key] = True
                                 new_variants.append({
-                                    'swatch_book': product_name,
-                                    'color': color,
-                                    'weight': weight,
+                                    'swatch_book': v['product_name'],
+                                    'color': v['color'],
+                                    'weight': v['weight'],
                                     'status': 'in_stock',
                                     'last_updated': datetime.now().strftime('%Y-%m-%d')
                                 })
