@@ -54,10 +54,6 @@ TOOL_CATEGORIES = {
     "Billing & Payments": {
         "icon": "💰",
         "tools": {
-            "Payment Fetch": {
-                "description": "Pull EOM billing reports from Stripe and PayPal",
-                "permission": "admin"
-            },
             "Order Payment Matcher": {
                 "description": "Match orders to payment transactions",
                 "permission": "admin"
@@ -321,98 +317,7 @@ def run_script(cmd, description):
 # BILLING & PAYMENTS
 # =============================================================================
 
-if tool == "Payment Fetch":
-    st.header("💰 Payment Fetch")
-    st.markdown("Fetch payment data from Stripe and PayPal for a date range.")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now() - timedelta(days=7)
-        )
-
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now()
-        )
-
-    if st.button("Fetch Payments", type="primary"):
-        user_email = st.session_state.get("user_email", "local")
-        with st.spinner("Fetching payment data..."):
-            try:
-                # Fetch directly using the imported functions
-                start_str = start_date.strftime("%Y-%m-%d")
-                end_str = end_date.strftime("%Y-%m-%d")
-
-                log_activity(user_email, "Payment Fetch", "fetch", f"{start_str} to {end_str}")
-
-                stripe_txns = fetch_stripe_readonly(start_str, end_str)
-                paypal_txns = fetch_paypal_readonly(start_str, end_str)
-
-                # Calculate summaries
-                stripe_gross = sum(t.get('gross', 0) for t in stripe_txns)
-                stripe_fees = sum(t.get('fee', 0) for t in stripe_txns)
-                stripe_net = sum(t.get('net', 0) for t in stripe_txns)
-
-                paypal_gross = sum(t.get('gross', 0) for t in paypal_txns)
-                paypal_fees = sum(t.get('fee', 0) for t in paypal_txns)
-                paypal_net = sum(t.get('net', 0) for t in paypal_txns)
-
-                st.success("Payment fetch completed!")
-
-                # Display summaries
-                st.subheader("Summary")
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    st.markdown("**Stripe**")
-                    st.write(f"Transactions: {len(stripe_txns)}")
-                    st.write(f"Gross: ${stripe_gross:,.2f}")
-                    st.write(f"Fees: ${stripe_fees:,.2f}")
-                    st.write(f"Net: ${stripe_net:,.2f}")
-
-                with col2:
-                    st.markdown("**PayPal**")
-                    st.write(f"Transactions: {len(paypal_txns)}")
-                    st.write(f"Gross: ${paypal_gross:,.2f}")
-                    st.write(f"Fees: ${paypal_fees:,.2f}")
-                    st.write(f"Net: ${paypal_net:,.2f}")
-
-                with col3:
-                    st.markdown("**Combined**")
-                    st.write(f"Transactions: {len(stripe_txns) + len(paypal_txns)}")
-                    st.write(f"Gross: ${stripe_gross + paypal_gross:,.2f}")
-                    st.write(f"Fees: ${stripe_fees + paypal_fees:,.2f}")
-                    st.write(f"Net: ${stripe_net + paypal_net:,.2f}")
-
-                # Generate CSV for download
-                csv_lines = ["Date,Source,Description,Gross,Fee,Net"]
-                for t in stripe_txns:
-                    csv_lines.append(f"{t.get('date','')},Stripe,{t.get('description','')},{t.get('gross',0):.2f},{t.get('fee',0):.2f},{t.get('net',0):.2f}")
-                for t in paypal_txns:
-                    csv_lines.append(f"{t.get('date','')},PayPal,{t.get('description','')},{t.get('gross',0):.2f},{t.get('fee',0):.2f},{t.get('net',0):.2f}")
-
-                csv_content = "\n".join(csv_lines)
-                filename = f"eom_billing_{start_str}_to_{end_str}.csv"
-
-                st.download_button(
-                    label="Download CSV",
-                    data=csv_content,
-                    file_name=filename,
-                    mime="text/csv",
-                    type="primary"
-                )
-
-            except Exception as e:
-                st.error(f"Error fetching payments: {e}")
-                import traceback
-                st.text(traceback.format_exc())
-
-
-elif tool == "Order Payment Matcher":
+if tool == "Order Payment Matcher":
     st.header("💰 Order Payment Matcher")
     st.markdown("Match Squarespace order numbers to Stripe/PayPal transactions to get net amounts and fees.")
 
