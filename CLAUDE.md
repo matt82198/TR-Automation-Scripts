@@ -14,13 +14,13 @@ Streamlit dashboard and CLI toolset for Tannery Row, a leather goods company. Th
 |--------|------|-------------|
 | `squarespace_to_quickbooks.py` | CLI + Streamlit | Convert Squarespace orders to QuickBooks IIF files |
 | `payment_fetch.py` | CLI only | Pull Stripe/PayPal transactions for EOM billing (read-only) |
-| `mystery_bundle_counter.py` | CLI + Streamlit | Count mystery bundle quantities by leather type |
+| `mystery_bundle_counter.py` | CLI + Streamlit | Count mystery bundle quantities by leather type (seasonal: Nov-Dec) |
 | `leather_weight_calculator.py` | CLI + Streamlit | Calculate/estimate box weights for shipping |
 | `toml_to_json.py` | CLI only | Convert TOML files to JSON (no argparse, uses sys.argv) |
 | `pending_order_count.py` | Streamlit only | Count pending panels and swatch books |
 | `order_payment_matcher.py` | Streamlit only | Match specific orders to payment transactions |
 | `quickbooks_billing_helper.py` | **Hidden** | Combine order + payment data for manual QB entry (see Future Plans) |
-| `swatch_book_contents.py` | Streamlit only | Generate swatch book reference PDF |
+| `swatch_book_contents.py` | Internal module | Scrape website for leather colors (used by sample inventory sync) |
 | `materialbank_method.py` | Streamlit only | Import Material Bank leads into Method CRM |
 | `email_helper.py` | Internal module | Email delivery (used by `squarespace_to_quickbooks.py`) |
 | `build_sku_mapping.py` | CLI only | Analyze orders and generate SKU mappings (outputs both detailed and simple formats) |

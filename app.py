@@ -68,13 +68,10 @@ TOOL_CATEGORIES = {
                 "permission": "standard"
             },
             "Mystery Bundle Counter": {
-                "description": "Track mystery bundle inventory",
-                "permission": "standard"
+                "description": "Track mystery bundle inventory (Nov-Dec only)",
+                "permission": "standard",
+                "seasonal": [11, 12]
             },
-            "Swatch Book Generator": {
-                "description": "Generate swatch book page layouts",
-                "permission": "standard"
-            }
         }
     },
     "Inventory & Shipping": {
@@ -253,10 +250,13 @@ for category, cat_data in available_tools.items():
 
     for tool_name in tool_names:
         tool_data = cat_data["tools"][tool_name]
+        seasonal = tool_data.get("seasonal")
+        is_off_season = seasonal and datetime.now().month not in seasonal
         if st.sidebar.button(
             tool_name,
             key=f"btn_{tool_name}",
-            use_container_width=True
+            use_container_width=True,
+            disabled=is_off_season
         ):
             st.session_state.selected_tool = tool_name
 
@@ -965,6 +965,88 @@ elif tool == "Manufacturing Inventory":
             m3.metric("Low Stock", low_stock)
             m4.metric("Out of Stock", out_of_stock)
 
+            # --- Print PDF ---
+            with st.expander("Print Swatch Book PDF"):
+                st.caption("Generate a printable PDF reference guide from current inventory data.")
+                if st.button("Generate PDF", type="primary", key="gen_swatch_pdf"):
+                    from fpdf import FPDF
+
+                    # Group inventory by tannery -> swatch book
+                    pdf_tannery = defaultdict(lambda: defaultdict(list))
+                    for item in si_inventory:
+                        sb = item['swatch_book']
+                        parts = sb.split(' ', 1)
+                        tannery = parts[0] if parts else 'Other'
+                        pdf_tannery[tannery][sb].append(item)
+
+                    pdf = FPDF()
+                    pdf.set_auto_page_break(auto=True, margin=20)
+
+                    # Title page
+                    pdf.add_page()
+                    pdf.ln(80)
+                    pdf.set_font("Helvetica", "B", 28)
+                    pdf.cell(0, 15, "THE TANNERY ROW", ln=True, align="C")
+                    pdf.set_font("Helvetica", "", 14)
+                    pdf.cell(0, 10, "", ln=True)
+                    pdf.cell(0, 10, "SWATCH BOOK REFERENCE GUIDE", ln=True, align="C")
+                    pdf.cell(0, 10, "", ln=True)
+                    pdf.set_font("Helvetica", "", 11)
+                    pdf.cell(0, 10, datetime.now().strftime("%B %Y"), ln=True, align="C")
+                    pdf.cell(0, 10, "", ln=True)
+                    pdf.cell(0, 8, f"{len(si_inventory)} colors across {len(set(i['swatch_book'] for i in si_inventory))} swatch books", ln=True, align="C")
+
+                    # Table of contents
+                    pdf.add_page()
+                    pdf.set_font("Helvetica", "B", 18)
+                    pdf.cell(0, 12, "Table of Contents", ln=True)
+                    pdf.ln(5)
+                    for tannery in sorted(pdf_tannery.keys()):
+                        books = pdf_tannery[tannery]
+                        pdf.set_font("Helvetica", "B", 12)
+                        pdf.cell(0, 8, tannery.upper(), ln=True)
+                        pdf.set_font("Helvetica", "", 10)
+                        for sb_name in sorted(books.keys()):
+                            leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
+                            count = len(books[sb_name])
+                            pdf.cell(10)
+                            pdf.cell(0, 6, f"{leather_type} ({count} colors)", ln=True)
+                        pdf.ln(3)
+
+                    # Each swatch book page
+                    for tannery in sorted(pdf_tannery.keys()):
+                        books = pdf_tannery[tannery]
+                        for sb_name in sorted(books.keys()):
+                            colors = books[sb_name]
+                            leather_type = sb_name.split(' ', 1)[1] if ' ' in sb_name else sb_name
+
+                            pdf.add_page()
+                            pdf.set_font("Helvetica", "", 10)
+                            pdf.cell(0, 6, tannery.upper(), ln=True)
+                            pdf.set_font("Helvetica", "B", 16)
+                            pdf.cell(0, 10, leather_type, ln=True)
+                            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                            pdf.ln(5)
+                            pdf.set_font("Helvetica", "", 10)
+                            pdf.cell(0, 6, f"{len(colors)} Colors", ln=True)
+                            pdf.ln(3)
+
+                            for color in sorted(colors, key=lambda x: x['color']):
+                                status = color['status']
+                                marker = {"in_stock": "[OK]", "low_stock": "[LOW]", "out_of_stock": "[OOS]"}.get(status, "")
+                                pdf.set_font("Helvetica", "", 11)
+                                pdf.cell(10)
+                                pdf.cell(0, 7, f"{color['color']}  {marker}", ln=True)
+
+                    pdf_bytes = pdf.output()
+                    st.download_button(
+                        label="Download Swatch Book PDF",
+                        data=bytes(pdf_bytes),
+                        file_name=f"Swatch_Book_Reference_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+                        mime="application/pdf"
+                    )
+                    st.success("PDF generated!")
+
             st.divider()
 
             by_tannery = defaultdict(lambda: defaultdict(list))
@@ -1348,37 +1430,6 @@ elif tool == "Leather Weight Calculator":
                         st.caption(f"{data['sample_weight']} lbs / {data['sample_sqft']} sqft")
 
                 st.divider()
-
-
-elif tool == "Swatch Book Generator":
-    st.header("🚚 Swatch Book Generator")
-    st.markdown("Generate a PDF reference guide of all leather colors from the website.")
-
-    if st.button("Generate Swatch Book PDF", type="primary"):
-        user_email = st.session_state.get("user_email", "local")
-        log_activity(user_email, "Swatch Book Generator", "generate", "PDF")
-
-        cmd = ["python", str(SCRIPTS_DIR / "swatch_book_contents.py")]
-
-        stdout, stderr, code = run_script(cmd, "swatch book generator")
-
-        if code == 0:
-            st.success("Swatch book generated!")
-            st.text(stdout)
-
-            pdf_path = Path(__file__).parent / "Swatch_Book_Reference.pdf"
-            if pdf_path.exists():
-                with open(pdf_path, "rb") as f:
-                    st.download_button(
-                        label="Download PDF",
-                        data=f.read(),
-                        file_name="Swatch_Book_Reference.pdf",
-                        mime="application/pdf"
-                    )
-        else:
-            st.error("Error generating swatch book")
-            if stderr:
-                st.text(stderr)
 
 
 # =============================================================================
