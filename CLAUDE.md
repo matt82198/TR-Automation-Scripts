@@ -4,6 +4,8 @@
 
 **Always use existing scripts with their CLI arguments. Never write ad-hoc Python to replicate what a script already does.** If a script exists for a task, use it. If a script is close but missing a feature, modify the script rather than writing a one-off.
 
+**Actively maintain this file.** When you learn something new about the codebase, add a new script, or discover a pattern, update CLAUDE.md immediately so future sessions have the context.
+
 ## Project Overview
 
 Streamlit dashboard and CLI toolset for Tannery Row, a leather goods company. The app (`app.py`) serves as an internal tools portal with role-based access, hosted on Streamlit Cloud. Individual scripts handle Squarespace order processing, QuickBooks billing, payment reconciliation, CRM integration, and inventory tracking. Always run CLI commands from the project root directory.
@@ -24,6 +26,8 @@ Streamlit dashboard and CLI toolset for Tannery Row, a leather goods company. Th
 | `materialbank_method.py` | Streamlit only | Import Material Bank leads into Method CRM |
 | `email_helper.py` | Internal module | Email delivery (used by `squarespace_to_quickbooks.py`) |
 | `build_sku_mapping.py` | CLI only | Analyze orders and generate SKU mappings (outputs both detailed and simple formats) |
+| `order_net_lookup.py` | CLI only | Look up net payment received for specific order(s) (Stripe/PayPal) |
+| `cage_inventory_manager.py` | CLI only | Manage cage inventory in Google Sheets (list, add, backup, restore) |
 | `stripe_invoices.py` | **Deprecated** | Replaced by `payment_fetch.py` |
 
 ---
@@ -164,6 +168,115 @@ Columns: `date`, `source`, `customer_name`, `customer_email`, `gross_amount`, `p
 - `STRIPE_API_KEY` (read-only restricted key)
 - `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`
 - `PAYPAL_MODE` (default: `live`; set to `sandbox` for testing)
+
+---
+
+### `order_net_lookup.py`
+
+Looks up net payment received (after Stripe/PayPal processing fees) for specific Squarespace order(s).
+
+**Single order:**
+```bash
+python scripts/order_net_lookup.py 13536
+```
+
+**Multiple orders:**
+```bash
+python scripts/order_net_lookup.py 13536,13537,13538
+```
+
+**Stripe only:**
+```bash
+python scripts/order_net_lookup.py 13536 --source stripe
+```
+
+#### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `order_numbers` | Required | Comma-separated order number(s) (positional arg) |
+| `--days` | `90` | How many days back to search for payments |
+| `--source` | `both` | `stripe`, `paypal`, or `both` |
+
+#### Output
+
+Prints to console: gross amount, payment source, processing fee, net received, and transaction ID for each order. For multiple orders, includes a summary with totals.
+
+#### How It Works
+
+1. Fetches order(s) from Squarespace API to get order date and gross amount
+2. Pulls Stripe/PayPal transactions for the order date range (+/- 3 days)
+3. Matches orders to payments by amount, date, email, and name
+4. Displays net received after fees
+
+#### Required Secrets
+
+- `SQUARESPACE_API_KEY`
+- `STRIPE_API_KEY` (if searching Stripe)
+- `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` (if searching PayPal)
+
+---
+
+### `cage_inventory_manager.py`
+
+Manages the cage inventory stored in Google Sheets. Connects directly using service account credentials from `.streamlit/secrets.toml`.
+
+**List current inventory:**
+```bash
+python scripts/cage_inventory_manager.py list
+```
+
+**Backup to CSV:**
+```bash
+python scripts/cage_inventory_manager.py backup
+```
+
+**Add untracked items inline:**
+```bash
+python scripts/cage_inventory_manager.py add --items "Amalfi Lux Burgundy|2-3 oz" "Black Yellowstone|4-5 oz" "Cognac Classic"
+```
+
+**Add catalog items with swatch book name:**
+```bash
+python scripts/cage_inventory_manager.py add --swatch-book "Horween Dublin" --items "Black|3-4 oz" "Natural|5-6 oz"
+```
+
+**Bulk add from CSV:**
+```bash
+python scripts/cage_inventory_manager.py add --csv items_to_add.csv
+```
+
+**Restore from backup:**
+```bash
+python scripts/cage_inventory_manager.py restore --csv output/cage_inventory_backup_2026-02-16.csv
+```
+
+#### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | Display all cage items grouped by swatch book |
+| `backup` | Export current inventory to CSV (`output/cage_inventory_backup_{timestamp}.csv`) |
+| `add` | Add items from `--items` (inline) or `--csv` (file). Auto-backups before modifying |
+| `export` | Export to CSV with custom `--output` path |
+| `restore` | Overwrite inventory from a CSV backup file. Auto-backups current state first |
+
+#### Add Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--items` | None | Inline items: `"description\|weight"` or `"description"` |
+| `--csv` | None | CSV file with columns: `swatch_book`, `color`, `weight` |
+| `--swatch-book` | `Untracked` | Swatch book name for inline items |
+| `--no-backup` | False | Skip automatic backup before modifying |
+
+#### Data Model
+
+Items use the same schema as Streamlit: `swatch_book`, `color`, `weight`, `date_added`. Custom/untracked items use `swatch_book = "Untracked"` with the description stored in `color`.
+
+#### Required Secrets
+
+- Google Sheets service account credentials in `.streamlit/secrets.toml` under `[connections.gsheets]`
 
 ---
 
