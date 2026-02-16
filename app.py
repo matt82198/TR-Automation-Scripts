@@ -1113,61 +1113,97 @@ elif tool == "Manufacturing Inventory":
         # --- Add to cage form ---
         st.subheader("Add Leather to Cage")
 
-        # Load sample inventory for dropdown options
-        if 'sample_inventory' not in st.session_state:
-            raw = load_sample_inventory(SAMPLE_INVENTORY_FILE)
-            seen = set()
-            deduped = []
-            for item in raw:
-                key = (item['swatch_book'], item['color'])
-                if key not in seen:
-                    seen.add(key)
-                    deduped.append(item)
-            st.session_state.sample_inventory = deduped
+        entry_mode = st.radio(
+            "Entry mode",
+            ["From Catalog", "Custom Entry"],
+            horizontal=True,
+            key="cage_entry_mode"
+        )
 
-        si_data = st.session_state.sample_inventory
-        if not si_data:
-            st.warning("Sync Sample Inventory first to populate swatch book options.")
-        else:
-            # Build dropdown options from sample inventory
-            sb_names = sorted(set(item['swatch_book'] for item in si_data))
+        if entry_mode == "From Catalog":
+            # Load sample inventory for dropdown options
+            if 'sample_inventory' not in st.session_state:
+                raw = load_sample_inventory(SAMPLE_INVENTORY_FILE)
+                seen = set()
+                deduped = []
+                for item in raw:
+                    key = (item['swatch_book'], item['color'])
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(item)
+                st.session_state.sample_inventory = deduped
 
-            selected_sb = st.selectbox("Swatch Book", sb_names, key="cage_sb_select")
+            si_data = st.session_state.sample_inventory
+            if not si_data:
+                st.warning("Sync Sample Inventory first to populate swatch book options.")
+            else:
+                sb_names = sorted(set(item['swatch_book'] for item in si_data))
+                selected_sb = st.selectbox("Swatch Book", sb_names, key="cage_sb_select")
 
-            # Colors for the selected swatch book
-            sb_colors = sorted(set(
-                item['color'] for item in si_data if item['swatch_book'] == selected_sb
-            ))
-            selected_color = st.selectbox("Color", sb_colors, key="cage_color_select")
+                sb_colors = sorted(set(
+                    item['color'] for item in si_data if item['swatch_book'] == selected_sb
+                ))
+                selected_color = st.selectbox("Color", sb_colors, key="cage_color_select")
 
-            # Optional weight
-            weight_options = ["(none)", "3-4 oz", "5-6 oz"]
-            selected_weight = st.selectbox("Weight (optional)", weight_options, key="cage_weight_select")
-            cage_weight = "" if selected_weight == "(none)" else selected_weight
+                weight_options = ["(none)", "2-3 oz", "3-4 oz", "4-5 oz", "5-6 oz", "6-7 oz", "7-8 oz", "8-9 oz", "9+ oz"]
+                selected_weight = st.selectbox("Weight (optional)", weight_options, key="cage_weight_select")
+                cage_weight = "" if selected_weight == "(none)" else selected_weight
 
-            if st.button("Add to Cage", type="primary"):
-                # Check if already in cage (same swatch_book + color + weight)
-                already = any(
-                    item['swatch_book'] == selected_sb
-                    and item['color'] == selected_color
-                    and item.get('weight', '') == cage_weight
-                    for item in cage_inventory
-                )
-                if already:
-                    weight_info = f" ({cage_weight})" if cage_weight else ""
-                    st.warning(f"{selected_sb} - {selected_color}{weight_info} is already in the cage.")
+                if st.button("Add to Cage", type="primary", key="cage_add_catalog"):
+                    already = any(
+                        item['swatch_book'] == selected_sb
+                        and item['color'] == selected_color
+                        and item.get('weight', '') == cage_weight
+                        for item in cage_inventory
+                    )
+                    if already:
+                        weight_info = f" ({cage_weight})" if cage_weight else ""
+                        st.warning(f"{selected_sb} - {selected_color}{weight_info} is already in the cage.")
+                    else:
+                        cage_inventory.append({
+                            'swatch_book': selected_sb,
+                            'color': selected_color,
+                            'weight': cage_weight,
+                            'date_added': datetime.now().strftime('%Y-%m-%d')
+                        })
+                        st.session_state.cage_inventory = cage_inventory
+                        save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)
+                        weight_info = f" ({cage_weight})" if cage_weight else ""
+                        st.toast(f"Added {selected_sb} - {selected_color}{weight_info} to cage!")
+                        st.rerun()
+
+        else:  # Custom Entry
+            st.caption("Add items not in the catalog. These will be grouped under **Untracked**.")
+            custom_desc = st.text_input("Description", placeholder="e.g. Amalfi Lux Burgundy, Black Tea Core Cypress", key="cage_custom_desc")
+            custom_weight = st.text_input("Weight (optional)", placeholder="e.g. 3-4 oz", key="cage_custom_weight")
+            cage_weight = custom_weight.strip()
+
+            if st.button("Add to Cage", type="primary", key="cage_add_custom"):
+                if not custom_desc.strip():
+                    st.warning("Description is required.")
                 else:
-                    cage_inventory.append({
-                        'swatch_book': selected_sb,
-                        'color': selected_color,
-                        'weight': cage_weight,
-                        'date_added': datetime.now().strftime('%Y-%m-%d')
-                    })
-                    st.session_state.cage_inventory = cage_inventory
-                    save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)
-                    weight_info = f" ({cage_weight})" if cage_weight else ""
-                    st.toast(f"Added {selected_sb} - {selected_color}{weight_info} to cage!")
-                    st.rerun()
+                    desc = custom_desc.strip()
+                    already = any(
+                        item['swatch_book'] == "Untracked"
+                        and item['color'] == desc
+                        and item.get('weight', '') == cage_weight
+                        for item in cage_inventory
+                    )
+                    if already:
+                        weight_info = f" ({cage_weight})" if cage_weight else ""
+                        st.warning(f"{desc}{weight_info} is already in the cage.")
+                    else:
+                        cage_inventory.append({
+                            'swatch_book': "Untracked",
+                            'color': desc,
+                            'weight': cage_weight,
+                            'date_added': datetime.now().strftime('%Y-%m-%d')
+                        })
+                        st.session_state.cage_inventory = cage_inventory
+                        save_cage_inventory(cage_inventory, CAGE_INVENTORY_FILE)
+                        weight_info = f" ({cage_weight})" if cage_weight else ""
+                        st.toast(f"Added {desc}{weight_info} to cage (untracked)!")
+                        st.rerun()
 
         st.divider()
 
@@ -1177,12 +1213,26 @@ elif tool == "Manufacturing Inventory":
         if not cage_inventory:
             st.info("Cage is empty.")
         else:
-            st.metric("Items in Cage", len(cage_inventory))
+            cage_search = st.text_input("Search cage...", key="cage_search", placeholder="Filter by name, color, or weight")
+            cage_search_lower = cage_search.strip().lower()
+
+            # Filter items if search is active
+            if cage_search_lower:
+                filtered_inventory = [
+                    item for item in cage_inventory
+                    if cage_search_lower in str(item.get('swatch_book', '')).lower()
+                    or cage_search_lower in str(item.get('color', '')).lower()
+                    or cage_search_lower in str(item.get('weight', '')).lower()
+                ]
+            else:
+                filtered_inventory = cage_inventory
+
+            st.metric("Items in Cage", f"{len(filtered_inventory)}" if not cage_search_lower else f"{len(filtered_inventory)} / {len(cage_inventory)}")
 
             # Group by swatch book
             cage_by_sb = defaultdict(list)
-            for item in cage_inventory:
-                cage_by_sb[item['swatch_book']].append(item)
+            for item in filtered_inventory:
+                cage_by_sb[str(item.get('swatch_book', ''))].append(item)
 
             to_remove = []
 
