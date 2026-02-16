@@ -1189,7 +1189,7 @@ elif tool == "Manufacturing Inventory":
             for sb_name in sorted(cage_by_sb.keys()):
                 items = cage_by_sb[sb_name]
                 with st.expander(f"**{sb_name}** ({len(items)} items)", expanded=True):
-                    for ci, item in enumerate(sorted(items, key=lambda x: (x['color'], x.get('weight', '')))):
+                    for ci, item in enumerate(sorted(items, key=lambda x: (str(x.get('color', '')), str(x.get('weight', ''))))):
                         col1, col2 = st.columns([4, 1])
                         with col1:
                             weight_label = f" - {item['weight']}" if item.get('weight') else ""
