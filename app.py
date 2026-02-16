@@ -36,9 +36,7 @@ from gsheets_storage import (
 
 from pending_order_count import SquarespacePanelCalculator
 from payment_fetch import fetch_stripe_readonly, fetch_paypal_readonly
-from order_payment_matcher import PaymentMatcher, SquarespaceOrderFetcher as PaymentOrderFetcher
-from squarespace_to_quickbooks import ProductMapper, CustomerMatcher, SHIP_FROM_STATE
-from qb_invoice_generator import generate_invoice_excel
+from order_payment_matcher import match_order_batch
 
 # =============================================================================
 # Prevent search engine indexing (internal tool only)
@@ -56,8 +54,8 @@ TOOL_CATEGORIES = {
     "Billing & Payments": {
         "icon": "💰",
         "tools": {
-            "QuickBooks Invoice Generator": {
-                "description": "Generate QB-ready Excel invoices with payment matching",
+            "Order Payment Matcher": {
+                "description": "Match orders to payment transactions",
                 "permission": "admin"
             },
         }
@@ -315,9 +313,9 @@ def run_script(cmd, description):
 # BILLING & PAYMENTS
 # =============================================================================
 
-if tool == "QuickBooks Invoice Generator":
-    st.header("🧾 QuickBooks Invoice Generator")
-    st.markdown("Generate QB-ready Excel invoices with payment matching, product mapping, and customer matching.")
+if tool == "Order Payment Matcher":
+    st.header("💰 Order Payment Matcher")
+    st.markdown("Match Squarespace order numbers to Stripe/PayPal transactions to get net amounts and fees.")
 
     # Date range for fetching payments
     st.subheader("Payment Date Range")
@@ -326,13 +324,13 @@ if tool == "QuickBooks Invoice Generator":
         start_date = st.date_input(
             "Start Date",
             value=datetime.now() - timedelta(days=30),
-            key="qbgen_start"
+            key="matcher_start"
         )
     with col2:
         end_date = st.date_input(
             "End Date",
             value=datetime.now(),
-            key="qbgen_end"
+            key="matcher_end"
         )
 
     # Order numbers input
@@ -343,7 +341,7 @@ if tool == "QuickBooks Invoice Generator":
         placeholder="12345\n12346\n12347\nor\n12345, 12346, 12347"
     )
 
-    if st.button("Generate Invoices", type="primary"):
+    if st.button("Match Orders to Payments", type="primary"):
         # Parse order numbers
         order_numbers = []
         if order_input:
@@ -361,103 +359,58 @@ if tool == "QuickBooks Invoice Generator":
                 st.error("SQUARESPACE_API_KEY environment variable not set")
             else:
                 try:
+                    # Fetch payment transactions with progress
                     start_str = start_date.strftime("%Y-%m-%d")
                     end_str = end_date.strftime("%Y-%m-%d")
 
                     user_email = st.session_state.get("user_email", "local")
-                    log_activity(user_email, "QuickBooks Invoice Generator", "generate", f"{len(order_numbers)} orders")
+                    log_activity(user_email, "Order Payment Matcher", "match", f"{len(order_numbers)} orders")
 
                     status = st.empty()
-
-                    # Step 1: Fetch payment transactions
-                    status.info("Fetching Stripe transactions...")
+                    status.info("Fetching Stripe transactions (this may take a minute for large date ranges)...")
                     stripe_txns = fetch_stripe_readonly(start_str, end_str)
 
                     status.info(f"Found {len(stripe_txns)} Stripe transactions. Fetching PayPal...")
                     paypal_txns = fetch_paypal_readonly(start_str, end_str)
-                    all_transactions = stripe_txns + paypal_txns
 
-                    # Step 2: Fetch full orders from Squarespace
-                    status.info(f"Fetching {len(order_numbers)} orders from Squarespace...")
-                    from quickbooks_billing_helper import SquarespaceOrderFetcher
-                    fetcher = SquarespaceOrderFetcher(ss_api_key)
-                    orders_raw = fetcher.fetch_orders_by_numbers(order_numbers)
+                    status.info(f"Found {len(paypal_txns)} PayPal transactions. Matching {len(order_numbers)} orders...")
 
-                    # Step 3: Match payments
-                    status.info("Matching orders to payments...")
-                    payment_fetcher = PaymentOrderFetcher(ss_api_key)
-                    orders_for_matching = [payment_fetcher.extract_order_info(o) for o in orders_raw]
-                    matcher = PaymentMatcher()
-                    payment_results = matcher.match_orders(orders_for_matching, all_transactions, order_numbers)
-
-                    # Step 4: Load product mapper
-                    status.info("Loading product mappings...")
-                    sku_mapper = ProductMapper()
-                    sku_mapping_file = str(Path(__file__).parent / "config" / "sku_mapping.csv")
-                    sku_mapper.load_product_mapping(sku_mapping_file)
-
-                    # Load holiday mappings if they exist
-                    holiday_file = str(Path(__file__).parent / "examples" / "holiday_sale_mappings.csv")
-                    if os.path.exists(holiday_file):
-                        sku_mapper.load_holiday_mapping(holiday_file)
-
-                    # Step 5: Load customer matcher
-                    customer_matcher = CustomerMatcher()
-                    customer_file = str(Path(__file__).parent / "config" / "qb_customer_list.csv")
-                    if os.path.exists(customer_file):
-                        customer_matcher.load_existing_customers(customer_file)
-                    customer_matcher.load_customer_import_log()
-
-                    # Step 6: Generate Excel
-                    status.info("Generating Excel workbook...")
-                    excel_data = generate_invoice_excel(
-                        orders_raw,
-                        payment_results,
-                        sku_mapper,
-                        customer_matcher,
-                        SHIP_FROM_STATE
+                    # Match orders
+                    results, summary = match_order_batch(
+                        order_numbers,
+                        ss_api_key,
+                        stripe_txns,
+                        paypal_txns
                     )
 
                     status.empty()
 
-                    # Build summary stats
-                    matched_results = [r for r in payment_results if r['matched']]
-                    unmatched_results = [r for r in payment_results if not r['matched']]
-                    not_found = [n for n in order_numbers if n not in [str(r['order_number']) for r in payment_results]]
-
-                    total_gross = sum(r.get('gross_amount', 0) or 0 for r in matched_results)
-                    total_net = sum(r.get('net_amount', 0) or 0 for r in matched_results)
-                    total_fees = sum(r.get('processing_fee', 0) or 0 for r in matched_results)
-                    total_writeoff = sum(r.get('write_off', 0) or 0 for r in matched_results)
-
                     # Display summary
-                    st.success(f"Generated invoices for {len(orders_raw)} orders ({len(matched_results)} payments matched)")
+                    st.success(f"Matched {summary['matched']}/{summary['total_orders']} orders")
 
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Total Gross", f"${total_gross:,.2f}")
+                        st.metric("Total Gross", f"${summary['total_gross']:,.2f}")
                     with col2:
-                        st.metric("Total Net", f"${total_net:,.2f}")
+                        st.metric("Total Net", f"${summary['total_net']:,.2f}")
                     with col3:
-                        st.metric("Total Fees", f"${total_fees:,.2f}")
+                        st.metric("Total Fees", f"${summary['total_fees']:,.2f}")
                     with col4:
-                        st.metric("Total Write-off", f"${total_writeoff:,.2f}")
+                        st.metric("Total Write-off", f"${summary['total_write_off']:,.2f}")
 
-                    if not_found:
-                        st.warning(f"Orders not found in Squarespace: {', '.join(not_found)}")
+                    if summary['not_found']:
+                        st.warning(f"Orders not found in Squarespace: {', '.join(summary['not_found'])}")
 
-                    # Report unmapped products
-                    if sku_mapper.unmapped_products:
-                        with st.expander(f"⚠️ {len(sku_mapper.unmapped_products)} Unmapped Product(s)", expanded=False):
-                            for product in sku_mapper.unmapped_products:
-                                st.text(f"  {product}")
-
-                    # Display results
+                    # Display results table
                     st.subheader("Results")
 
-                    if matched_results:
+                    # Separate matched and unmatched
+                    matched = [r for r in results if r['matched']]
+                    unmatched = [r for r in results if not r['matched']]
+
+                    if matched:
                         st.markdown("**Matched Orders:**")
-                        for r in matched_results:
+                        for r in matched:
                             with st.expander(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f}"):
                                 col1, col2 = st.columns(2)
                                 with col1:
@@ -471,17 +424,25 @@ if tool == "QuickBooks Invoice Generator":
                                     st.write(f"**Fee:** ${r['processing_fee']:.2f}")
                                     st.write(f"**Write-off:** ${r['write_off']:.2f}")
 
-                    if unmatched_results:
+                    if unmatched:
                         st.markdown("**Unmatched Orders:**")
-                        for r in unmatched_results:
+                        for r in unmatched:
                             st.warning(f"Order #{r['order_number']} - {r['customer_name']} - ${r['gross_amount']:.2f} (No payment match found)")
 
-                    # Excel download button
+                    # Generate CSV for download
+                    csv_lines = ["Order Number,Date,Customer,Email,Payment Source,Gross,Net,Fee,Write-off,Matched"]
+                    for r in results:
+                        net = f"{r['net_amount']:.2f}" if r['net_amount'] is not None else ""
+                        fee = f"{r['processing_fee']:.2f}" if r['processing_fee'] is not None else ""
+                        writeoff = f"{r['write_off']:.2f}" if r['write_off'] is not None else ""
+                        csv_lines.append(f"{r['order_number']},{r['order_date']},{r['customer_name']},{r['customer_email']},{r['payment_source']},{r['gross_amount']:.2f},{net},{fee},{writeoff},{r['matched']}")
+
+                    csv_content = "\n".join(csv_lines)
                     st.download_button(
-                        label="Download Excel Invoices",
-                        data=excel_data,
-                        file_name=f"qb_invoices_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        label="Download Results CSV",
+                        data=csv_content,
+                        file_name=f"order_payment_match_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                        mime="text/csv",
                         type="primary"
                     )
 
