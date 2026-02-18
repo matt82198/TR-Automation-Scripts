@@ -764,6 +764,10 @@ class CustomerMatcher:
         self.phone_map = {}  # phone -> customer_name
         self.lastname_map = {}  # lastname -> [customer_names]
         self.firstname_map = {}  # firstname -> [customer_names]
+        self.import_log_names = set()  # names loaded from import log (vs QB export)
+        self._new_in_batch_names = set()  # names registered mid-batch via register_new_customer()
+        self.last_match_method = None  # "email", "phone", or "name" - set by find_match()
+        self.last_match_source = None  # "QB export", "import log", or "new in batch" - set by find_match()
 
     def load_customer_import_log(self) -> None:
         """Load customers from our import log (customers added since last QB export)."""
@@ -809,6 +813,7 @@ class CustomerMatcher:
                         if name not in self.lastname_map[last_lower]:
                             self.lastname_map[last_lower].append(name)
 
+                    self.import_log_names.add(name)
                     count += 1
 
             print(f"  Loaded {count} previously imported customer(s)")
@@ -892,6 +897,16 @@ class CustomerMatcher:
         except Exception as e:
             print(f"Warning: Could not load customers: {e}")
 
+    def _set_match_info(self, matched_name: str, method: str) -> None:
+        """Set match tracking attributes after a successful match."""
+        self.last_match_method = method
+        if matched_name in self.import_log_names:
+            self.last_match_source = 'import log'
+        elif matched_name in self._new_in_batch_names:
+            self.last_match_source = 'new in batch'
+        else:
+            self.last_match_source = 'QB export'
+
     def find_match(self, email: str, phone: str, first_name: str, last_name: str) -> Optional[str]:
         """
         Try to find existing customer by (in order of reliability):
@@ -900,18 +915,26 @@ class CustomerMatcher:
         3. First + Last name (partial match required) - requires BOTH to match
 
         Returns: Existing customer name or None (create new customer if None)
+        Also sets self.last_match_method and self.last_match_source on match.
         """
+        self.last_match_method = None
+        self.last_match_source = None
+
         # 1. Try email match (most reliable)
         if email:
             email_lower = email.strip().lower()
             if email_lower in self.email_map:
-                return self.email_map[email_lower]
+                matched = self.email_map[email_lower]
+                self._set_match_info(matched, 'email')
+                return matched
 
         # 2. Try phone match (very reliable)
         if phone:
             phone_normalized = normalize_for_matching(phone)
             if phone_normalized and phone_normalized in self.phone_map:
-                return self.phone_map[phone_normalized]
+                matched = self.phone_map[phone_normalized]
+                self._set_match_info(matched, 'phone')
+                return matched
 
         # 3. Try name match - MUST have both first AND last name match
         # Last name alone is NOT sufficient (too many false positives)
@@ -929,21 +952,54 @@ class CustomerMatcher:
                     if first_normalized and len(first_normalized) >= 2:
                         # Check for partial first name match (at least 2 chars)
                         if first_normalized in candidate_normalized:
+                            self._set_match_info(candidate, 'name')
                             return candidate
                         # Also check if candidate's first part matches our first name
                         candidate_parts = candidate.split()
                         if candidate_parts:
                             candidate_first = normalize_for_matching(candidate_parts[0])
                             if candidate_first and first_normalized in candidate_first:
+                                self._set_match_info(candidate, 'name')
                                 return candidate
                             # Check middle name too if exists
                             if len(candidate_parts) > 2:
                                 candidate_middle = normalize_for_matching(candidate_parts[1])
                                 if candidate_middle and first_normalized in candidate_middle:
+                                    self._set_match_info(candidate, 'name')
                                     return candidate
 
         # No match found - will create new customer
         return None
+
+    def register_new_customer(self, name: str, email: str, phone: str, first_name: str, last_name: str) -> None:
+        """Register a new customer mid-batch so duplicate orders match correctly."""
+        if not hasattr(self, '_new_in_batch_names'):
+            self._new_in_batch_names = set()
+        self._new_in_batch_names.add(name)
+
+        if email:
+            email_lower = email.strip().lower()
+            if email_lower not in self.email_map:
+                self.email_map[email_lower] = name
+
+        if phone:
+            phone_normalized = normalize_for_matching(phone)
+            if phone_normalized and phone_normalized not in self.phone_map:
+                self.phone_map[phone_normalized] = name
+
+        if first_name:
+            first_lower = first_name.strip().lower()
+            if first_lower not in self.firstname_map:
+                self.firstname_map[first_lower] = []
+            if name not in self.firstname_map[first_lower]:
+                self.firstname_map[first_lower].append(name)
+
+        if last_name:
+            last_lower = last_name.strip().lower()
+            if last_lower not in self.lastname_map:
+                self.lastname_map[last_lower] = []
+            if name not in self.lastname_map[last_lower]:
+                self.lastname_map[last_lower].append(name)
 
 
 def is_in_state_order(order: Dict[str, Any], ship_from_state: str) -> bool:
@@ -1126,7 +1182,9 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
     # Track customers for reporting
     matched_customers = set()
+    matched_details = {}  # customer_name -> {"matched_to": str, "method": str, "source": str, "order_numbers": []}
     new_customers = set()
+    new_customer_orders = {}  # customer_name -> [order_numbers]
     customer_records = {}  # customer_name -> customer_info (with tax code)
     invoice_count = 0
 
@@ -1135,6 +1193,8 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         # Skip canceled orders
         if order.get('fulfillmentStatus') == 'CANCELED':
             continue
+
+        order_number = str(order.get('orderNumber', order.get('id', 'UNKNOWN')))
 
         # Get customer details for matching
         billing = order.get('billingAddress', {})
@@ -1152,6 +1212,15 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         if customer_name:
             # Found existing customer!
             matched_customers.add(customer_name)
+            # Track match details for reporting
+            if customer_name not in matched_details:
+                matched_details[customer_name] = {
+                    'matched_to': customer_name,
+                    'method': customer_matcher.last_match_method,
+                    'source': customer_matcher.last_match_source,
+                    'order_numbers': []
+                }
+            matched_details[customer_name]['order_numbers'].append(order_number)
         else:
             # Create new customer name
             if first_name and last_name:
@@ -1163,6 +1232,13 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
 
             customer_name = sanitize_customer_name(customer_name)
             new_customers.add(customer_name)
+            if customer_name not in new_customer_orders:
+                new_customer_orders[customer_name] = []
+            new_customer_orders[customer_name].append(order_number)
+
+            # Register with matcher so duplicate orders in this batch match correctly
+            if customer_matcher:
+                customer_matcher.register_new_customer(customer_name, email, phone, first_name, last_name)
 
             # Store customer details for CUST record (only for new customers)
             if customer_name not in customer_records:
@@ -1260,39 +1336,81 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         else:
             print(f"No new customers found - all matched existing customers")
 
+        if new_customers:
+            print(f"\n  NEW CUSTOMERS:")
+            for name in sorted(new_customers):
+                order_nums = new_customer_orders.get(name, [])
+                order_str = ', '.join(f'#{n}' for n in order_nums)
+                print(f"    - {name} ({order_str})")
+
+        if matched_details:
+            print(f"\n  MATCHED CUSTOMERS:")
+            for name, details in sorted(matched_details.items()):
+                order_nums = details.get('order_numbers', [])
+                order_str = ', '.join(f'#{n}' for n in order_nums)
+                method = details.get('method', '?')
+                source = details.get('source', '?')
+                print(f"    - {name} ({order_str}) -> via {method}, {source}")
+
         # Generate report
         report_filename = filename.replace('.iif', '_NEW_CUSTOMERS.txt')
         with open(report_filename, 'w', encoding='utf-8') as report:
             report.write("=" * 70 + "\n")
-            report.write("NEW CUSTOMERS FROM SQUARESPACE\n")
+            report.write("CUSTOMER MATCHING REPORT\n")
             report.write("=" * 70 + "\n\n")
             report.write(f"New customers: {len(new_customers)}\n")
             if customer_matcher:
                 report.write(f"Matched existing: {len(matched_customers)}\n")
-            report.write("\n" + "-" * 70 + "\n\n")
+            report.write("\n")
 
-            for i, cust_name in enumerate(sorted(new_customers), 1):
-                cust_info = customer_records.get(cust_name, {})
-                report.write(f"{i}. {cust_name}\n")
-                if cust_info.get('email'):
-                    report.write(f"   Email: {cust_info['email']}\n")
-                if cust_info.get('phone'):
-                    report.write(f"   Phone: {cust_info['phone']}\n")
-                report.write(f"   Bill To:\n")
-                if cust_info.get('addr1'):
-                    report.write(f"      {cust_info['addr1']}\n")
-                if cust_info.get('addr2'):
-                    report.write(f"      {cust_info['addr2']}\n")
-                if cust_info.get('addr3'):
-                    report.write(f"      {cust_info['addr3']}\n")
-                report.write(f"   Ship To:\n")
-                if cust_info.get('saddr1'):
-                    report.write(f"      {cust_info['saddr1']}\n")
-                if cust_info.get('saddr2'):
-                    report.write(f"      {cust_info['saddr2']}\n")
-                if cust_info.get('saddr3'):
-                    report.write(f"      {cust_info['saddr3']}\n")
-                report.write("\n")
+            if new_customers:
+                report.write("-" * 70 + "\n")
+                report.write("NEW CUSTOMERS:\n")
+                report.write("-" * 70 + "\n\n")
+
+                for i, cust_name in enumerate(sorted(new_customers), 1):
+                    cust_info = customer_records.get(cust_name, {})
+                    order_nums = new_customer_orders.get(cust_name, [])
+                    order_str = ', '.join(f'#{n}' for n in order_nums)
+                    report.write(f"{i}. {cust_name}\n")
+                    if order_str:
+                        report.write(f"   Order(s): {order_str}\n")
+                    if cust_info.get('email'):
+                        report.write(f"   Email: {cust_info['email']}\n")
+                    if cust_info.get('phone'):
+                        report.write(f"   Phone: {cust_info['phone']}\n")
+                    report.write(f"   Bill To:\n")
+                    if cust_info.get('addr1'):
+                        report.write(f"      {cust_info['addr1']}\n")
+                    if cust_info.get('addr2'):
+                        report.write(f"      {cust_info['addr2']}\n")
+                    if cust_info.get('addr3'):
+                        report.write(f"      {cust_info['addr3']}\n")
+                    report.write(f"   Ship To:\n")
+                    if cust_info.get('saddr1'):
+                        report.write(f"      {cust_info['saddr1']}\n")
+                    if cust_info.get('saddr2'):
+                        report.write(f"      {cust_info['saddr2']}\n")
+                    if cust_info.get('saddr3'):
+                        report.write(f"      {cust_info['saddr3']}\n")
+                    report.write("\n")
+
+            if matched_details:
+                report.write("-" * 70 + "\n")
+                report.write("MATCHED CUSTOMERS:\n")
+                report.write("-" * 70 + "\n\n")
+
+                for i, (cust_name, details) in enumerate(sorted(matched_details.items()), 1):
+                    order_nums = details.get('order_numbers', [])
+                    order_str = ', '.join(f'#{n}' for n in order_nums)
+                    method = details.get('method', '?')
+                    source = details.get('source', '?')
+                    matched_to = details.get('matched_to', '?')
+                    report.write(f"{i}. {cust_name}\n")
+                    if order_str:
+                        report.write(f"   Order(s): {order_str}\n")
+                    report.write(f"   Matched to: {matched_to} (via {method}, {source})\n")
+                    report.write("\n")
 
         print(f"REPORT: {report_filename}")
         return
@@ -1516,28 +1634,32 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
     report_filename = filename.replace('.iif', '_NEW_CUSTOMERS.txt')
     with open(report_filename, 'w', encoding='utf-8') as report:
         report.write("=" * 70 + "\n")
-        report.write("NEW CUSTOMERS CREATED FROM SQUARESPACE IMPORT\n")
+        report.write("CUSTOMER MATCHING REPORT\n")
         report.write("=" * 70 + "\n\n")
 
         if customer_matcher:
             report.write(f"Total Invoices: {invoice_count}\n")
             report.write(f"Existing Customers (matched): {len(matched_customers)}\n")
             report.write(f"NEW CUSTOMERS (flagged): {len(new_customers)}\n\n")
-            report.write("-" * 70 + "\n\n")
         else:
             report.write(f"Total Invoices: {invoice_count}\n")
             report.write(f"Customers in IIF file: {len(new_customers)}\n\n")
             report.write("NOTE: No customer matching was performed.\n")
             report.write("QuickBooks will compare by name and create only truly new customers.\n\n")
-            report.write("-" * 70 + "\n\n")
 
         if new_customers:
-            report.write("FLAGGED NEW CUSTOMERS:\n")
-            report.write("(These customer records are in the IIF file)\n\n")
+            report.write("-" * 70 + "\n")
+            report.write("NEW CUSTOMERS:\n")
+            report.write("(These customer records are in the IIF file)\n")
+            report.write("-" * 70 + "\n\n")
 
             for i, cust_name in enumerate(sorted(new_customers), 1):
                 cust_info = customer_records.get(cust_name, {})
+                order_nums = new_customer_orders.get(cust_name, [])
+                order_str = ', '.join(f'#{n}' for n in order_nums)
                 report.write(f"{i}. {cust_name}\n")
+                if order_str:
+                    report.write(f"   Order(s): {order_str}\n")
                 if cust_info.get('email'):
                     report.write(f"   Email: {cust_info['email']}\n")
                 if cust_info.get('phone'):
@@ -1558,7 +1680,24 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
                     report.write(f"      {cust_info['saddr3']}\n")
                 report.write("\n")
         else:
-            report.write("No new customers - all orders matched existing customers!\n")
+            report.write("No new customers - all orders matched existing customers!\n\n")
+
+        if matched_details:
+            report.write("-" * 70 + "\n")
+            report.write("MATCHED CUSTOMERS:\n")
+            report.write("-" * 70 + "\n\n")
+
+            for i, (cust_name, details) in enumerate(sorted(matched_details.items()), 1):
+                order_nums = details.get('order_numbers', [])
+                order_str = ', '.join(f'#{n}' for n in order_nums)
+                method = details.get('method', '?')
+                source = details.get('source', '?')
+                matched_to = details.get('matched_to', '?')
+                report.write(f"{i}. {cust_name}\n")
+                if order_str:
+                    report.write(f"   Order(s): {order_str}\n")
+                report.write(f"   Matched to: {matched_to} (via {method}, {source})\n")
+                report.write("\n")
 
     # Generate unmapped products report (if any)
     if sku_mapper and sku_mapper.unmapped_products:
@@ -1610,9 +1749,22 @@ def generate_iif_file(orders: List[Dict[str, Any]], filename: str, ar_account: s
         if new_customers:
             print(f"\n  NEW CUSTOMERS THAT WILL BE CREATED:")
             for name in sorted(new_customers)[:15]:
-                print(f"    - {name}")
+                order_nums = new_customer_orders.get(name, [])
+                order_str = ', '.join(f'#{n}' for n in order_nums)
+                print(f"    - {name} ({order_str})")
             if len(new_customers) > 15:
                 print(f"    ... and {len(new_customers) - 15} more")
+
+        if matched_details:
+            print(f"\n  MATCHED CUSTOMERS:")
+            for name, details in sorted(matched_details.items())[:15]:
+                order_nums = details.get('order_numbers', [])
+                order_str = ', '.join(f'#{n}' for n in order_nums)
+                method = details.get('method', '?')
+                source = details.get('source', '?')
+                print(f"    - {name} ({order_str}) -> via {method}, {source}")
+            if len(matched_details) > 15:
+                print(f"    ... and {len(matched_details) - 15} more")
     else:
         print(f"\nCUSTOMER SUMMARY:")
         print(f"  Customers in IIF: {len(new_customers)}")

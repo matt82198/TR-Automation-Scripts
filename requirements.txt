@@ -22,6 +22,9 @@ pandas>=2.0.0
 # PDF Generation (Swatch Book Reference)
 fpdf2>=2.7.0
 
+# Excel Generation (QuickBooks Invoice Generator)
+openpyxl>=3.1.0
+
 # Google Sheets Integration (Persistent Data Storage)
 st-gsheets-connection>=0.0.4
 gspread>=5.12.0

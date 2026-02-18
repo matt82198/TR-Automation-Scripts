@@ -28,6 +28,7 @@ Streamlit dashboard and CLI toolset for Tannery Row, a leather goods company. Th
 | `build_sku_mapping.py` | CLI only | Analyze orders and generate SKU mappings (outputs both detailed and simple formats) |
 | `order_net_lookup.py` | CLI only | Look up net payment received for specific order(s) (Stripe/PayPal) |
 | `cage_inventory_manager.py` | CLI only | Manage cage inventory in Google Sheets (list, add, backup, restore) |
+| `qb_invoice_generator.py` | Streamlit only (**Alpha**) | Generate QB-ready Excel invoices with payment matching |
 | `stripe_invoices.py` | **Deprecated** | Replaced by `payment_fetch.py` |
 
 ---
@@ -408,6 +409,15 @@ Imports Material Bank leads into Method CRM. Creates contacts, companies, and fo
 - **API:** Method CRM REST API
 - **Note:** The Method API key is hardcoded at line 16 rather than read from secrets (inconsistent with other scripts)
 - **Features:** Dry-run preview, activity due dates (1 week after sample order), duplicate detection, rate-limit retries (3s/60s/60s)
+
+### `qb_invoice_generator.py` **(Alpha)**
+
+Generates Excel workbooks with invoice line items for copy-paste into QuickBooks Desktop Enterprise.
+
+- **Key function:** `generate_invoice_excel(orders_raw, payment_results, sku_mapper, customer_matcher, ship_from_state)` → returns `bytes` (xlsx)
+- **Output:** One sheet per order with header info (customer, date, address), mapped line items (Item, Description, Qty, Rate, Amount, Tax Code), and payment match details
+- **Depends on:** `squarespace_to_quickbooks.py` (ProductMapper, CustomerMatcher), `order_payment_matcher.py` (PaymentMatcher), `quickbooks_billing_helper.py` (SquarespaceOrderFetcher), `openpyxl`
+- **Status:** Alpha — available in Streamlit under "QB Invoice Generator (Alpha)" in Billing & Payments. Verify output before importing.
 
 ### `email_helper.py`
 
@@ -858,7 +868,7 @@ Set `SKIP_AUTH=true` as an environment variable to bypass authentication in loca
 
 | Category | Tools | Permission Level |
 |----------|-------|-----------------|
-| Billing & Payments | Payment Fetch, Order Payment Matcher, QuickBooks Billing | admin |
+| Billing & Payments | Order Payment Matcher, QB Invoice Generator (Alpha) | admin |
 | Order Management | Pending Order Count, Mystery Bundle Counter, Swatch Book Generator | standard |
 | Inventory & Shipping | Leather Weight Calculator | standard |
 | Customer Management | Material Bank Leads | materialbank (special flag) |
@@ -910,19 +920,11 @@ Requires `.streamlit/secrets.toml` with API keys or equivalent environment varia
 
 ## Future Plans
 
-### QuickBooks Billing Tool (Streamlit)
+### QuickBooks Invoice Generator — Promote from Alpha
 
-The current `quickbooks_billing_helper.py` Streamlit tool has been hidden from the dashboard. It needs to be rebuilt to export an Excel file with line items formatted for direct copy-paste into QuickBooks Desktop Enterprise invoice entry.
+The QB Invoice Generator (`qb_invoice_generator.py`) is live as Alpha in the dashboard. Remaining work:
 
-**Requirements:**
-- Input: Squarespace order numbers (same as current)
-- Output: Downloadable `.xlsx` file with columns matching QB Desktop Enterprise invoice line item entry (Item, Description, Qty, Rate, Amount, Tax Code)
-- Each order should be a separate sheet or clearly separated section
-- Line items should use the QB item names from `config/sku_mapping.csv` mapping (not raw Squarespace product names)
-- Include customer name, invoice date, ship-to address, and payment info (Stripe/PayPal match)
-- Format should allow selecting all line item rows in Excel and pasting directly into a QB Desktop Enterprise invoice
-
-**Existing code to leverage:**
-- `scripts/quickbooks_billing_helper.py` — has `get_billing_data()`, `generate_line_items_table()` (needs rework)
-- `scripts/squarespace_to_quickbooks.py` — has SKU mapping and customer matching logic
-- `scripts/payment_fetch.py` — Stripe/PayPal transaction fetching
+- Verify Excel output matches QB Desktop Enterprise paste format exactly
+- Test with real invoice imports across different product types
+- Handle edge cases: canceled orders, partial refunds, multi-payment orders
+- Once validated, remove "(Alpha)" label and retire `quickbooks_billing_helper.py`
