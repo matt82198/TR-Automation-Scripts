@@ -1,6 +1,6 @@
 # Tannery Row Tools
 
-Internal automation toolbox for The Tannery Row LLC. A Streamlit-based dashboard providing tools for payment processing, order management, inventory tracking, and QuickBooks integration.
+Internal automation toolbox for The Tannery Row LLC. A Streamlit-based dashboard providing tools for payment processing, order management, inventory tracking, and QuickBooks integration. Written entirely using .MD for instruction and Claude Code, for fun.
 
 ## Quick Start
 
